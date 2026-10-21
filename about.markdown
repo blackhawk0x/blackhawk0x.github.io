@@ -4,7 +4,7 @@ title: about
 permalink: /about/
 ---
 
-I'm **blackhawk0x** — a security researcher and CTF player. I spend most of
+I'm **blackhawk0x** — a CTF player. I spend most of
 my time pulling things apart: malware samples, binaries, and the occasional
 web app that really shouldn't have shipped like that.
 

