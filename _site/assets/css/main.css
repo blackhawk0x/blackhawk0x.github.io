@@ -61,7 +61,7 @@ a {
 a:hover, a:focus-visible { color: #a6ecf5; }
 
 .shell {
-  max-width: 56rem;
+  max-width: 72rem;
   margin-inline: auto;
   padding-inline: var(--space-s);
 }
