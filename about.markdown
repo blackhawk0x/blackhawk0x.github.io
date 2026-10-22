@@ -1,17 +1,16 @@
 ---
 layout: page
-title: about
+title: About
 permalink: /about/
 ---
 
-I'm **blackhawk0x** — a CTF player. I spend most of
-my time pulling things apart: malware samples, binaries, and the occasional
-web app that really shouldn't have shipped like that.
+I'm **blackhawk0x** — I'm interested in how systems work, where they break, and why.
 
-This site is where I write up CTF challenges, reverse-engineering notes, and
-malware analysis walkthroughs.
+Most of my time goes into security labs, Active Directory, penetration testing, and figuring out attack paths that aren't immediately obvious. I also spend time digging into the details, understanding why an exploit works, malware samples, binaries, and the occasional web app.
 
-**Currently interested in:** reverse engineering, malware analysis, threat
-intel, Linux internals, and low-level exploitation.
+This site is where I keep my writeups, notes, and things worth documenting. Not everything here is a polished guide; some of it is simply a record of working through a problem and understanding it properly.
 
-Find me elsewhere via the links in the footer.
+**Areas I'm exploring**:
+Active Directory security, privilege escalation, network pivoting, reverse engineering, malware analysis, and Linux internals.
+
+

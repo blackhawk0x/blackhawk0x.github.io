@@ -4,10 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
+
   <title>HTB Writeups · blackhawk0x</title>
   <meta name="description" content="Writeups, malware analysis, and reverse engineering notes by blackhawk0x.">
+
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/assets/css/main.css">
+
   <link type="application/atom+xml" rel="alternate" href="http://localhost:4000/feed.xml" title="blackhawk0x" />
   <!-- Begin Jekyll SEO tag v2.8.0 -->
 <title>HTB Writeups | blackhawk0x</title>
@@ -15,8 +18,8 @@
 <meta property="og:title" content="HTB Writeups" />
 <meta name="author" content="blackhawk0x" />
 <meta property="og:locale" content="en_US" />
-<meta name="description" content="Hack The Box machines, Active Directory attacks, and Pro Labs." />
-<meta property="og:description" content="Hack The Box machines, Active Directory attacks, and Pro Labs." />
+<meta name="description" content="Hack The Box machines, Active Directory attacks, and Linux Enumeration." />
+<meta property="og:description" content="Hack The Box machines, Active Directory attacks, and Linux Enumeration." />
 <link rel="canonical" href="http://localhost:4000/htb/" />
 <meta property="og:url" content="http://localhost:4000/htb/" />
 <meta property="og:site_name" content="blackhawk0x" />
@@ -24,19 +27,22 @@
 <meta name="twitter:card" content="summary" />
 <meta property="twitter:title" content="HTB Writeups" />
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebPage","author":{"@type":"Person","name":"blackhawk0x"},"description":"Hack The Box machines, Active Directory attacks, and Pro Labs.","headline":"HTB Writeups","url":"http://localhost:4000/htb/"}</script>
+{"@context":"https://schema.org","@type":"WebPage","author":{"@type":"Person","name":"blackhawk0x"},"description":"Hack The Box machines, Active Directory attacks, and Linux Enumeration.","headline":"HTB Writeups","url":"http://localhost:4000/htb/"}</script>
 <!-- End Jekyll SEO tag -->
 
 </head>
+
 <body>
   <header class="site-head">
     <div class="site-head__inner shell">
-      <a href="/" class="wordmark">blackhawk<span class="dot">0x</span></a>
-      <nav class="nav">
+      <a href="/" class="wordmark" aria-label="blackhawk0x home">
+        blackhawk<span class="dot">0x</span>
+      </a>
+
+      <nav class="nav" aria-label="Main navigation">
+        <a href="/htb/" class="nav__link">htb</a>
         <a href="/tags/" class="nav__link">topics</a>
         <a href="/about/" class="nav__link">about</a>
-        <a href="/htb/" class="nav__link">htb</a>
-	<a href="/feed.xml" class="nav__link">rss</a>
       </nav>
     </div>
   </header>
@@ -46,7 +52,7 @@
   <header class="post-head">
     <h1 class="post-title">HTB Writeups</h1>
     
-      <p class="hero__sub">Hack The Box machines, Active Directory attacks, and Pro Labs.</p>
+      <p class="category_hero__sub">Hack The Box machines, Active Directory attacks, and Linux Enumeration.</p>
     
   </header>
 
@@ -82,11 +88,44 @@
               
                 <span class="row__tag">Active Directory</span><span class="row__comma">·</span>
               
-                <span class="row__tag">kerberoasting</span><span class="row__comma">·</span>
+                <span class="row__tag">Kerberoasting</span><span class="row__comma">·</span>
               
                 <span class="row__tag">SMB Enumeration</span><span class="row__comma">·</span>
               
                 <span class="row__tag">GPP</span>
+              
+            </p>
+          
+        </div>
+      </article>
+    
+      
+
+      
+
+      <article class="row">
+        <time class="row__date"
+              datetime="2026-10-22T00:00:00+05:30">
+          Oct 22
+        </time>
+        <span class="row__bar"></span>
+        <div class="row__content">
+          <a class="row__title" href="/posts/administrator/">
+            Hack The Box: Administrator
+          </a>
+          
+          
+            <p class="row__meta">
+              
+                <span class="row__tag">BloodHound</span><span class="row__comma">·</span>
+              
+                <span class="row__tag">FTP</span><span class="row__comma">·</span>
+              
+                <span class="row__tag">Password Safe</span><span class="row__comma">·</span>
+              
+                <span class="row__tag">Kerberoasting</span><span class="row__comma">·</span>
+              
+                <span class="row__tag">Active Directory</span>
               
             </p>
           
@@ -113,9 +152,7 @@
               
                 <span class="row__tag">as-rep-roasting</span><span class="row__comma">·</span>
               
-                <span class="row__tag">bloodhound</span><span class="row__comma">·</span>
-              
-                <span class="row__tag">dcsync</span><span class="row__comma">·</span>
+                <span class="row__tag">BloodHound</span><span class="row__comma">·</span>
               
                 <span class="row__tag">Active Directory</span>
               
@@ -135,30 +172,32 @@
       <div class="foot__bar">
         <p class="foot__id">
           <span class="foot__brand">blackhawk0x</span>
-          <span class="foot__role">Ctf player</span>
+          <span class="foot__role">Security · Systems · Notes</span>
         </p>
+
         <div class="foot__navs">
-          <nav class="foot__group" aria-label="site">
-            <a class="foot__link" href="/">writeups</a>
-            <span class="foot__dot">·</span><a class="foot__link" href="/tags/">topics</a>
-            <span class="foot__dot">·</span><a class="foot__link" href="/about/">about</a>
+          <nav class="foot__group" aria-label="Site links">
+            <a class="foot__link" href="/about/">about</a>
           </nav>
-          <nav class="foot__group" aria-label="elsewhere">
-            <a class="foot__link" href="https://github.com/blackhawk0x" rel="me noopener">github</a>
+
+          <nav class="foot__group" aria-label="External profiles">
             
-            <span class="foot__dot">·</span><a class="foot__link" href="mailto:your_email@example.com">email</a>
+              <a class="foot__link" href="https://github.com/blackhawk0x" rel="me noopener noreferrer">github</a>
+            
+            
+            
+              <span class="foot__dot" aria-hidden="true">·</span>
+              <a class="foot__link" href="mailto:lalitkandpallalit@gmail.com">email</a>
+            
+            <span class="foot__dot" aria-hidden="true">·</span>
+            <a class="foot__link" href="https://www.linkedin.com/in/lalit-kandpal/" rel="me noopener noreferrer">linkedin</a>
           </nav>
-          <nav class="foot__group" aria-label="machine readable">
-            <a class="foot__link" href="/feed.xml">rss</a>
-            <span class="foot__dot">·</span><a class="foot__link" href="/sitemap.xml">sitemap</a>
+
+          <nav class="foot__group" aria-label="Site resources">
+            <a class="foot__link" href="/sitemap.xml">sitemap</a>
           </nav>
         </div>
       </div>
-      <p class="foot__colophon">
-        <span>&copy; 2026 blackhawk0x</span>
-        <span class="foot__dot">·</span>
-        <span>no tracker</span>
-      </p>
     </div>
   </footer>
 </body>

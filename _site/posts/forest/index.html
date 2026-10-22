@@ -4,12 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Hack The Box: Forest · blackhawk0x</title>
-  <meta name="description" content="Hack The Box Forest — Write-Up
 
-">
+  <title>Hack The Box: Forest · blackhawk0x</title>
+  <meta name="description" content="HTB Forest">
+
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/assets/css/main.css">
+
   <link type="application/atom+xml" rel="alternate" href="http://localhost:4000/feed.xml" title="blackhawk0x" />
   <!-- Begin Jekyll SEO tag v2.8.0 -->
 <title>Hack The Box: Forest | blackhawk0x</title>
@@ -17,8 +18,8 @@
 <meta property="og:title" content="Hack The Box: Forest" />
 <meta name="author" content="blackhawk0x" />
 <meta property="og:locale" content="en_US" />
-<meta name="description" content="Hack The Box Forest — Write-Up" />
-<meta property="og:description" content="Hack The Box Forest — Write-Up" />
+<meta name="description" content="HTB Forest" />
+<meta property="og:description" content="HTB Forest" />
 <link rel="canonical" href="http://localhost:4000/posts/forest/" />
 <meta property="og:url" content="http://localhost:4000/posts/forest/" />
 <meta property="og:site_name" content="blackhawk0x" />
@@ -27,19 +28,22 @@
 <meta name="twitter:card" content="summary" />
 <meta property="twitter:title" content="Hack The Box: Forest" />
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"blackhawk0x"},"dateModified":"2026-10-21T00:00:00+05:30","datePublished":"2026-10-21T00:00:00+05:30","description":"Hack The Box Forest — Write-Up","headline":"Hack The Box: Forest","mainEntityOfPage":{"@type":"WebPage","@id":"http://localhost:4000/posts/forest/"},"url":"http://localhost:4000/posts/forest/"}</script>
+{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"blackhawk0x"},"dateModified":"2026-10-21T00:00:00+05:30","datePublished":"2026-10-21T00:00:00+05:30","description":"HTB Forest","headline":"Hack The Box: Forest","mainEntityOfPage":{"@type":"WebPage","@id":"http://localhost:4000/posts/forest/"},"url":"http://localhost:4000/posts/forest/"}</script>
 <!-- End Jekyll SEO tag -->
 
 </head>
+
 <body>
   <header class="site-head">
     <div class="site-head__inner shell">
-      <a href="/" class="wordmark">blackhawk<span class="dot">0x</span></a>
-      <nav class="nav">
+      <a href="/" class="wordmark" aria-label="blackhawk0x home">
+        blackhawk<span class="dot">0x</span>
+      </a>
+
+      <nav class="nav" aria-label="Main navigation">
+        <a href="/htb/" class="nav__link">htb</a>
         <a href="/tags/" class="nav__link">topics</a>
         <a href="/about/" class="nav__link">about</a>
-        <a href="/htb/" class="nav__link">htb</a>
-	<a href="/feed.xml" class="nav__link">rss</a>
       </nav>
     </div>
   </header>
@@ -52,12 +56,12 @@
       2026.10.21
       
         &nbsp;·&nbsp;
-        <a class="row__tag" href="/tags/#as-rep-roasting">as-rep-roasting</a>, <a class="row__tag" href="/tags/#bloodhound">bloodhound</a>, <a class="row__tag" href="/tags/#dcsync">dcsync</a>, <a class="row__tag" href="/tags/#active-directory">Active Directory</a>
+        <a class="row__tag" href="/tags/#as-rep-roasting">as-rep-roasting</a>, <a class="row__tag" href="/tags/#bloodhound">BloodHound</a>, <a class="row__tag" href="/tags/#active-directory">Active Directory</a>
       
     </p>
   </header>
   <div class="post-content">
-    <h1 id="hack-the-box-forest--write-up">Hack The Box Forest — Write-Up</h1>
+    <h1 id="htb-forest">HTB Forest</h1>
 
 <h2 id="overview">Overview</h2>
 
@@ -346,30 +350,32 @@ Root flag
       <div class="foot__bar">
         <p class="foot__id">
           <span class="foot__brand">blackhawk0x</span>
-          <span class="foot__role">Ctf player</span>
+          <span class="foot__role">Security · Systems · Notes</span>
         </p>
+
         <div class="foot__navs">
-          <nav class="foot__group" aria-label="site">
-            <a class="foot__link" href="/">writeups</a>
-            <span class="foot__dot">·</span><a class="foot__link" href="/tags/">topics</a>
-            <span class="foot__dot">·</span><a class="foot__link" href="/about/">about</a>
+          <nav class="foot__group" aria-label="Site links">
+            <a class="foot__link" href="/about/">about</a>
           </nav>
-          <nav class="foot__group" aria-label="elsewhere">
-            <a class="foot__link" href="https://github.com/blackhawk0x" rel="me noopener">github</a>
+
+          <nav class="foot__group" aria-label="External profiles">
             
-            <span class="foot__dot">·</span><a class="foot__link" href="mailto:your_email@example.com">email</a>
+              <a class="foot__link" href="https://github.com/blackhawk0x" rel="me noopener noreferrer">github</a>
+            
+            
+            
+              <span class="foot__dot" aria-hidden="true">·</span>
+              <a class="foot__link" href="mailto:lalitkandpallalit@gmail.com">email</a>
+            
+            <span class="foot__dot" aria-hidden="true">·</span>
+            <a class="foot__link" href="https://www.linkedin.com/in/lalit-kandpal/" rel="me noopener noreferrer">linkedin</a>
           </nav>
-          <nav class="foot__group" aria-label="machine readable">
-            <a class="foot__link" href="/feed.xml">rss</a>
-            <span class="foot__dot">·</span><a class="foot__link" href="/sitemap.xml">sitemap</a>
+
+          <nav class="foot__group" aria-label="Site resources">
+            <a class="foot__link" href="/sitemap.xml">sitemap</a>
           </nav>
         </div>
       </div>
-      <p class="foot__colophon">
-        <span>&copy; 2026 blackhawk0x</span>
-        <span class="foot__dot">·</span>
-        <span>no tracker</span>
-      </p>
     </div>
   </footer>
 </body>

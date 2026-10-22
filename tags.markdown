@@ -4,7 +4,7 @@ title: topics
 permalink: /tags/
 ---
 <header class="post-head">
-  <h1 class="post-title">topics</h1>
+  <h1 class="post-title">Topics</h1>
   <p class="post-meta">every tag used across writeups</p>
 </header>
 

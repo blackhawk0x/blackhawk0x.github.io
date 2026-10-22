@@ -1,14 +1,15 @@
 ---
 layout: default
 ---
+
 <header class="hero">
-  <p class="hero__eyebrow">blackhawk0x</p>
-  <h1 class="hero__statement">I Break <span class="accent">Things.</span></h1>
+  <!-- <p class="hero__eyebrow">blackhawk0x / security research &amp; notes</p> -->
+  <h1 class="hero__statement">Technical <span class="accent">Blogs</span></h1>
   <p class="hero__sub">{{ site.description }}</p>
   <hr class="hero__rule">
 </header>
 
-<section class="index" aria-label="writeups">
+<section class="index" aria-label="Posts">
   {% assign posts_by_year = site.posts | group_by_exp: "post", "post.date | date: '%Y'" %}
   {% for year in posts_by_year %}
     <div class="index__year">

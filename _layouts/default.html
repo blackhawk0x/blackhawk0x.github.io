@@ -4,22 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
+
   <title>{% if page.title %}{{ page.title }} · {{ site.title }}{% else %}{{ site.title }} · {{ site.tagline }}{% endif %}</title>
-  <meta name="description" content="{{ page.excerpt | default: site.description | strip_html | truncate: 160 }}">
+  <meta name="description" content="{{ page.excerpt | default: site.description | strip_html | normalize_whitespace | escape | truncate: 160 }}">
+
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="{{ '/assets/css/main.css' | relative_url }}">
+
   {% feed_meta %}
   {% seo %}
 </head>
+
 <body>
   <header class="site-head">
     <div class="site-head__inner shell">
-      <a href="{{ '/' | relative_url }}" class="wordmark">blackhawk<span class="dot">0x</span></a>
-      <nav class="nav">
+      <a href="{{ '/' | relative_url }}" class="wordmark" aria-label="blackhawk0x home">
+        blackhawk<span class="dot">0x</span>
+      </a>
+
+      <nav class="nav" aria-label="Main navigation">
+        <a href="{{ '/htb/' | relative_url }}" class="nav__link">htb</a>
         <a href="{{ '/tags/' | relative_url }}" class="nav__link">topics</a>
         <a href="{{ '/about/' | relative_url }}" class="nav__link">about</a>
-        <a href="{{ '/htb/' | relative_url }}" class="nav__link">htb</a>
-	<a href="{{ '/feed.xml' | relative_url }}" class="nav__link">rss</a>
       </nav>
     </div>
   </header>
@@ -33,30 +39,35 @@
       <div class="foot__bar">
         <p class="foot__id">
           <span class="foot__brand">blackhawk0x</span>
-          <span class="foot__role">Ctf player</span>
+          <span class="foot__role">Security · Systems · Notes</span>
         </p>
+
         <div class="foot__navs">
-          <nav class="foot__group" aria-label="site">
-            <a class="foot__link" href="{{ '/' | relative_url }}">writeups</a>
-            <span class="foot__dot">·</span><a class="foot__link" href="{{ '/tags/' | relative_url }}">topics</a>
-            <span class="foot__dot">·</span><a class="foot__link" href="{{ '/about/' | relative_url }}">about</a>
+          <nav class="foot__group" aria-label="Site links">
+            <a class="foot__link" href="{{ '/about/' | relative_url }}">about</a>
           </nav>
-          <nav class="foot__group" aria-label="elsewhere">
-            {% if site.github_username %}<a class="foot__link" href="https://github.com/{{ site.github_username }}" rel="me noopener">github</a>{% endif %}
-            {% if site.discord_username and site.discord_username != "" %}<span class="foot__dot">·</span><a class="foot__link" href="https://discord.com/users/{{ site.discord_username }}" rel="me noopener">discord</a>{% endif %}
-            {% if site.email %}<span class="foot__dot">·</span><a class="foot__link" href="mailto:{{ site.email }}">email</a>{% endif %}
+
+          <nav class="foot__group" aria-label="External profiles">
+            {% if site.github_username %}
+              <a class="foot__link" href="https://github.com/{{ site.github_username }}" rel="me noopener noreferrer">github</a>
+            {% endif %}
+            {% if site.discord_username and site.discord_username != "" %}
+              <span class="foot__dot" aria-hidden="true">·</span>
+              <a class="foot__link" href="https://discord.com/users/{{ site.discord_username }}" rel="me noopener noreferrer">discord</a>
+            {% endif %}
+            {% if site.email %}
+              <span class="foot__dot" aria-hidden="true">·</span>
+              <a class="foot__link" href="mailto:{{ site.email | escape }}">email</a>
+            {% endif %}
+            <span class="foot__dot" aria-hidden="true">·</span>
+            <a class="foot__link" href="https://www.linkedin.com/in/lalit-kandpal/" rel="me noopener noreferrer">linkedin</a>
           </nav>
-          <nav class="foot__group" aria-label="machine readable">
-            <a class="foot__link" href="{{ '/feed.xml' | relative_url }}">rss</a>
-            <span class="foot__dot">·</span><a class="foot__link" href="{{ '/sitemap.xml' | relative_url }}">sitemap</a>
+
+          <nav class="foot__group" aria-label="Site resources">
+            <a class="foot__link" href="{{ '/sitemap.xml' | relative_url }}">sitemap</a>
           </nav>
         </div>
       </div>
-      <p class="foot__colophon">
-        <span>&copy; {{ 'now' | date: "%Y" }} blackhawk0x</span>
-        <span class="foot__dot">·</span>
-        <span>no tracker</span>
-      </p>
     </div>
   </footer>
 </body>
