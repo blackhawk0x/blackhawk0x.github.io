@@ -1,7 +1,7 @@
 name: "Build and Deploy"
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, gh-chirpy-pages]
     paths-ignore: [.gitignore, README.md, LICENSE]
   workflow_dispatch:
 
